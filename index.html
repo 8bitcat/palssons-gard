@@ -163,6 +163,11 @@ MANIFEST.tables = 'Objects/Interior/Tables and desks.png';
 MANIFEST.chairs = 'Objects/Interior/Chairs.png';
 MANIFEST.carpet = 'Tileset/carpet.png';
 MANIFEST.iothers = 'Objects/Interior/Others.png';
+MANIFEST.kitchen = 'Objects/Interior/Part 9 copiar.png';
+MANIFEST.part1 = 'Objects/Interior/Part 1 copiar.png';
+MANIFEST.part2 = 'Objects/Interior/Part 2 copiar.png';
+MANIFEST.sofa = 'Objects/Interior/Sofa and armchair.png';
+MANIFEST.well = 'Objects/Exterior/Well .png'; // OBS mellanslag före .png
 const TIERDIR = ['1. Wood', '2. Cooper']; // OBS: packmakaren stavar koppar "Cooper" — och kannan olika per mapp
 const TIERTOOLS = [
   { hoe:'Hoe.png', can:'Watering can.png', axe:'Axe.png', pick:'Pickaxe.png', sword:'Sword.png' },
@@ -353,14 +358,21 @@ const STAGES = 5; // sista växtsteget = moget (frame 6 i arken är TOM, frame 7
 // ===================== KARTAN =====================
 const MW = 44, WORLD_H = 30, MH = 48; // raderna under världen = husets interiör (kameran når aldrig båda samtidigt)
 // husets rum: golv, väggrader ovanför, dörr-teleporter och sängen
-const ROOM = { x0:3, y0:42, x1:12, y1:46 };
+// tre rum: sovrum, kök, vardagsrum — dörröppningar i mellanväggarna vid rad 44–45
+const RY0 = 42, RY1 = 46;
+const ROOMS = [
+  { x0:3,  x1:12, floor:[15,1], wall:4 },   // sovrum (skiffervägg)
+  { x0:14, x1:22, floor:[23,0], wall:10 },  // kök (rosa vägg, diamantgolv)
+  { x0:24, x1:32, floor:[15,1], wall:1 }    // vardagsrum (beige vägg)
+];
+const ROOM = { x0:3, y0:RY0, x1:12, y1:RY1 }; // sovrummet (dörren/sängen bor här)
 const DOOR_OUT = { tx:5, ty:8 };    // dörröppningen — husets dörrgrafik ligger över tiles 5–6 (uppmätt: px 42–55 i arket)
 const DOOR_SPAWN = { tx:6, ty:9 };
 const ROOM_ENTRY = { tx:7, ty:45 };
 const ROOM_EXIT = { tx:7, ty:46 };  // kliv på mattan → ut igen
 const BED = { tx:10, ty:42 };       // dubbelsäng 2x2
-const TABLE = { tx:4, ty:44 };      // matbord 2x1 med stolar på sidorna
-const RUG = { x0:6, y0:43 };        // blå 4x3-matta (carpet-arkets fyllda block kol 4–7, rad 4–6)
+const TABLE = { tx:17, ty:44 };     // matbord i köket med stolar på sidorna
+const RUG = { x0:26, y0:43 };       // blå 4x3-matta i vardagsrummet (carpet-arkets fyllda block kol 4–7, rad 4–6)
 // kind: 0 gräs, 1 jordstig, 2 vatten, 3 blockerad(osynlig), 4 odlingsjord
 const map = [];
 const solidAt = (tx,ty)=>{
@@ -371,6 +383,8 @@ const solidAt = (tx,ty)=>{
 let trees = [], fences = [], nodes = [], slimes = [];
 const HOUSE = { tx:3, ty:2, w:8, h:7 };       // sprite 128x112 → 8x7 tiles
 const CHEST = { tx:16, ty:7 };                 // kistan: slem & övrigt monsterloot
+const WELL = { tx:18, ty:6 };                  // brunnen — fyll vattenkannan här
+const maxWater = p => 5 + (p.tier.can||0)*5;   // träkanna 5 skopor, kopparkanna 10
 const FORGE = { tx:12, ty:4 };                 // ugnen (smält 2 malm + 1 stock → tacka)
 const ANVILP = { tx:15, ty:4 };                // städet (smid kopparverktyg, 2 tackor/st)
 // säljlådor med skylt — rätt gröda i rätt låda, säljs när dagen är slut
@@ -403,8 +417,9 @@ function buildMap(){
   // husets fotavtryck (nedre 4 rader av spriten är solid kropp)
   for(let y=HOUSE.ty+3;y<HOUSE.ty+HOUSE.h;y++) for(let x=HOUSE.tx;x<HOUSE.tx+HOUSE.w;x++) set(x,y,3);
   // (dörren hålls stängd tills interiören byggs i fas 4 — hela husfoten är solid)
-  // säljkistan + smedjan + lådorna
+  // säljkistan + smedjan + lådorna + brunnen
   set(CHEST.tx, CHEST.ty, 3);
+  set(WELL.tx, WELL.ty, 3); set(WELL.tx+1, WELL.ty, 3); set(WELL.tx, WELL.ty+1, 3); set(WELL.tx+1, WELL.ty+1, 3);
   set(FORGE.tx, FORGE.ty, 3);
   set(ANVILP.tx, ANVILP.ty, 3);
   crateCount = { carrot:0, potato:0, straw:0 };
@@ -420,9 +435,13 @@ function buildMap(){
   for(let y=2;y<WORLD_H-2;y++){ fences.push([1,y]); fences.push([MW-2,y]); set(1,y,3); set(MW-2,y,3); }
   // interiören: allt under världen är blockerat utom rummets golv
   for(let y=WORLD_H;y<MH;y++) for(let x=0;x<MW;x++) set(x,y,3);
-  for(let y=ROOM.y0;y<=ROOM.y1;y++) for(let x=ROOM.x0;x<=ROOM.x1;x++) set(x,y,0);
+  for(const r of ROOMS) for(let y=RY0;y<=RY1;y++) for(let x=r.x0;x<=r.x1;x++) set(x,y,0);
+  for(const gx of [13,23]) for(const gy of [44,45]) set(gx,gy,0); // dörröppningar mellan rummen
   set(BED.tx,BED.ty,3); set(BED.tx+1,BED.ty,3); set(BED.tx,BED.ty+1,3); set(BED.tx+1,BED.ty+1,3);
   set(TABLE.tx,TABLE.ty,3); set(TABLE.tx+1,TABLE.ty,3);
+  for(let x=15;x<=21;x++) set(x,RY0,3);          // köksbänkraden
+  set(26,44,3); set(27,44,3);                     // soffan
+  set(30,RY0,3); set(31,RY0,3);                   // pianot
   set(DOOR_OUT.tx, DOOR_OUT.ty, 0); set(DOOR_OUT.tx+1, DOOR_OUT.ty, 0); // dörröppning 2 tiles bred
   // träd i hörnen och längs kanterna
   const spots = [[24,3],[28,2],[33,4],[38,3],[40,8],[3,12],[2,18],[4,24],[9,25],[40,17],[36,12],[25,25],[31,26]];
@@ -466,7 +485,7 @@ function save(){
       trees: trees.map(t=>({s:t.stump?1:0, r:t.regrowDag, hp:t.hp})),
       nodes: nodes.map(n=>n.brutet?1:0),
       crates: crateCount,
-      pl: players.map(p=>({nm:p.name, def:p.def, seeds:p.seeds, carry:p.carry, en:Math.round(p.energy), mats:p.mats, tier:p.tier, tool:p.tool}))
+      pl: players.map(p=>({nm:p.name, def:p.def, seeds:p.seeds, carry:p.carry, en:Math.round(p.energy), mats:p.mats, tier:p.tier, tool:p.tool, wa:p.water}))
     };
     localStorage.setItem('gard-save', JSON.stringify(data));
   }catch(e){}
@@ -619,7 +638,8 @@ function pushStatus(){
       if(p){
         const td = TOOLDEF[p.tool];
         const icp = td.seed ? MANIFEST[td.seed] : MANIFEST['i_'+td.id+'_'+(p.tier[td.id]||0)];
-        msg = { t:'you', st:'play', cls:p.name, color:p.col, en:Math.round(p.energy), tool:td.namn, icp, fr: td.seed?7:0 };
+        msg = { t:'you', st:'play', cls:p.name, color:p.col, en:Math.round(p.energy), tool:td.namn, icp, fr: td.seed?7:0,
+                wt: td.id==='can' ? p.water/maxWater(p) : null, wn: td.id==='can' ? p.water : null };
       }
     }
     netSend(id, msg);
@@ -706,17 +726,24 @@ function startCtrl(code){
   const tb = document.getElementById('toolBox'), tctx = tb.getContext('2d');
   tctx.imageSmoothingEnabled = false;
   let tbNyckel = '';
-  const ritaTool = (icp, fr)=>{
+  const ritaTool = (icp, fr, wt)=>{
     if(!icp) return;
-    const nyckel = icp+'|'+fr;
-    const slot = loadImg('UI/Inventory/Slots.png'), ikon = loadImg(icp);
+    const nyckel = icp+'|'+fr+'|'+wt;
+    const slot = loadImg('UI/Inventory/Slots.png'), ikon = loadImg(icp), bars = loadImg('UI/Bars.png');
     const rita = ()=>{
       tctx.clearRect(0,0,96,96);
-      if(slot.complete && slot.naturalWidth) tctx.drawImage(slot, 151, 6, 18, 18, 0, 0, 96, 96);
-      if(ikon.complete && ikon.naturalWidth) tctx.drawImage(ikon, fr*16, 0, 16, 16, 16, 16, 64, 64);
+      if(slot.complete && slot.naturalWidth) tctx.drawImage(slot, 151, 6, 18, 18, 12, 0, 84, 84);
+      if(ikon.complete && ikon.naturalWidth) tctx.drawImage(ikon, fr*16, 0, 16, 16, 26, 14, 56, 56);
+      if(wt!=null && bars.complete && bars.naturalWidth){ // vattenmätare bredvid kannan
+        tctx.drawImage(bars, 179, 3, 10, 42, 0, 4, 12, 50);
+        const fh = Math.round(34 * Math.max(0, Math.min(1, wt)));
+        tctx.save(); tctx.beginPath(); tctx.rect(0, 4+50-fh-4, 12, fh+4); tctx.clip();
+        tctx.drawImage(bars, 131, 3, 10, 42, 0, 4, 12, 50);
+        tctx.restore();
+      }
     };
     rita();
-    if(nyckel!==tbNyckel){ tbNyckel = nyckel; slot.onload = rita; ikon.onload = rita; }
+    if(nyckel!==tbNyckel){ tbNyckel = nyckel; slot.onload = rita; ikon.onload = rita; bars.onload = rita; }
   };
   const st={x:0,y:0,a:false,s:false};
   let conn=null, connected=false, attempts=0;
@@ -750,7 +777,7 @@ function startCtrl(code){
       else {
         top.innerHTML='<span style="color:'+d.color+'">&#9632; '+d.cls+'</span> · Energi '+d.en+' · <b>'+d.tool+'</b>';
         tb.style.display='block';
-        ritaTool(d.icp, d.fr||0);
+        ritaTool(d.icp, d.fr||0, d.wt);
       }
     });
     conn.on('close', ()=>{ if(connected){ connected=false; top.innerHTML='<b style="color:#ff8a6a">Tappade anslutningen.</b> Försöker igen…'; setTimeout(tryConnect,2000); } });
@@ -799,6 +826,7 @@ function makePlayer(i, ctrlId, def, name){
     carry:{carrot:0, potato:0, straw:0},
     mats:{wood:0, stone:0, ore:0, ingot:0, goo:0},
     tier:{hoe:0, can:0, axe:0, pick:0, sword:0},
+    water:5,
     lastCrop:null, hurtT:0,
     moving:false
   };
@@ -836,18 +864,25 @@ function startGame(){
     }
     // interiören + dörren är facit oavsett vad saven säger (äldre saves saknar rummet)
     for(let y=WORLD_H;y<MH;y++) for(let x=0;x<MW;x++) map[y*MW+x].kind = 3;
-    for(let y=ROOM.y0;y<=ROOM.y1;y++) for(let x=ROOM.x0;x<=ROOM.x1;x++) map[y*MW+x].kind = 0;
+    for(const r of ROOMS) for(let y=RY0;y<=RY1;y++) for(let x=r.x0;x<=r.x1;x++) map[y*MW+x].kind = 0;
+    for(const gx of [13,23]) for(const gy of [44,45]) map[gy*MW+gx].kind = 0;
+    for(let x=15;x<=21;x++) map[RY0*MW+x].kind = 3;
+    map[44*MW+26].kind=3; map[44*MW+27].kind=3;
+    map[RY0*MW+30].kind=3; map[RY0*MW+31].kind=3;
     map[BED.ty*MW+BED.tx].kind=3; map[BED.ty*MW+BED.tx+1].kind=3;
     map[(BED.ty+1)*MW+BED.tx].kind=3; map[(BED.ty+1)*MW+BED.tx+1].kind=3;
     map[TABLE.ty*MW+TABLE.tx].kind=3; map[TABLE.ty*MW+TABLE.tx+1].kind=3;
     map[DOOR_OUT.ty*MW+DOOR_OUT.tx].kind = 0; map[DOOR_OUT.ty*MW+DOOR_OUT.tx+1].kind = 0;
     for(const cr of CRATES){ map[cr.ty*MW+cr.tx].kind = 3; map[(cr.ty-1)*MW+cr.tx].kind = 3; }
     map[CHEST.ty*MW+CHEST.tx].kind = 3;
+    map[WELL.ty*MW+WELL.tx].kind=3; map[WELL.ty*MW+WELL.tx+1].kind=3;
+    map[(WELL.ty+1)*MW+WELL.tx].kind=3; map[(WELL.ty+1)*MW+WELL.tx+1].kind=3;
     players.forEach((p,i)=>{ const sp=sv.pl&&sv.pl[i]; if(sp){
       p.seeds=sp.seeds||p.seeds; p.carry=sp.carry||p.carry; p.energy=sp.en??100;
       if(sp.mats) p.mats = Object.assign(p.mats, sp.mats);
       if(sp.tier) p.tier = Object.assign(p.tier, sp.tier);
       if(sp.tool!==undefined && sp.tool<TOOLDEF.length) p.tool = sp.tool;
+      if(sp.wa!==undefined) p.water = sp.wa;
     } });
     // träd/noder är facit — kartans kinds skrivs om EFTER dem (gamla saves saknar noderna helt)
     if(sv.trees && sv.trees.length===trees.length)
@@ -896,6 +931,11 @@ function useTool(p){
     return;
   }
   if(dist(p.x, p.y, CHEST.tx*TS+16, CHEST.ty*TS+16) < 60){ sellCarry(p); return; }
+  if(dist(p.x, p.y, (WELL.tx+1)*TS, (WELL.ty+1)*TS) < 64){
+    if(p.water >= maxWater(p)) ftext(p.x, p.y-40, 'Kannan är redan full', '#9aab88');
+    else { p.water = maxWater(p); burst((WELL.tx+1)*TS, WELL.ty*TS+16, '#5b93e8', 10); ftext(p.x, p.y-40, 'Kannan påfylld! ('+p.water+' skopor)', '#7ec8e8'); }
+    return;
+  }
   if(dist(p.x, p.y, FORGE.tx*TS+16, FORGE.ty*TS+16) < 60){ useForge(p); return; }
   if(dist(p.x, p.y, ANVILP.tx*TS+16, ANVILP.ty*TS+16) < 60){ useAnvil(p); return; }
   const [tx,ty] = facingTile(p);
@@ -922,7 +962,8 @@ function useTool(p){
     if(t.kind===0 && inField && !t.soil){ startAct(p,'hoe',()=>{ t.kind=4; t.soil={wet:false,wetT:0,crop:null}; p.energy=Math.max(0,p.energy-kost(3)); burst(tx*TS+16,ty*TS+16,'#a06a3a',6); }); }
     else if(t.kind===0 && !inField) ftext(tx*TS+16, ty*TS, 'Odla på fältet →', '#9aab88');
   } else if(td.id==='can'){
-    if(t.soil){ startAct(p,'water',()=>{ t.soil.wet=true; t.soil.wetT=90; p.energy=Math.max(0,p.energy-kost(1)); burst(tx*TS+16,ty*TS+16,'#5b93e8',6); }); }
+    if(p.water<=0){ ftext(p.x, p.y-40, 'Kannan är tom — fyll på vid brunnen!', '#7ec8e8'); return; }
+    if(t.soil){ startAct(p,'water',()=>{ t.soil.wet=true; t.soil.wetT=90; p.water--; p.energy=Math.max(0,p.energy-kost(1)); burst(tx*TS+16,ty*TS+16,'#5b93e8',6); }); }
   } else if(td.id==='axe'){
     const tr = trees.find(t2=>!t2.stump && dist(tx*TS+16, ty*TS+16, t2.tx*TS+16, t2.ty*TS+16) < 40);
     if(tr){
@@ -1351,16 +1392,19 @@ function draw(){
       // interiörraderna: plankgolv i rummet, väggpanel ovanför, mörker runtom
       if(ty>=WORLD_H){
         // som inspirationsbilden: mörkt parkettgolv, blågrå väggband, brun ram, svart runtom
-        const iRoom = tx>=ROOM.x0 && tx<=ROOM.x1 && ty>=ROOM.y0 && ty<=ROOM.y1;
-        const iWall = tx>=ROOM.x0 && tx<=ROOM.x1 && (ty===ROOM.y0-2 || ty===ROOM.y0-1);
-        const iFrame = tx>=ROOM.x0-1 && tx<=ROOM.x1+1 && ty>=ROOM.y0-3 && ty<=ROOM.y1+1;
+        const rm = ROOMS.find(r=>tx>=r.x0 && tx<=r.x1);
+        const iRoom = rm && ty>=RY0 && ty<=RY1;
+        const iDoor = (tx===13||tx===23) && (ty===44||ty===45);
+        const iWall = rm && (ty===RY0-2 || ty===RY0-1);
+        const iFrame = tx>=ROOMS[0].x0-1 && tx<=ROOMS[ROOMS.length-1].x1+1 && ty>=RY0-3 && ty<=RY1+1;
         if(iRoom && IMG.houseTiles){
-          drawTile(IMG.houseTiles, 15, 1, dx, dy); // mörkt rödbrunt tegel som i inspirationsbilden
-          // blå 4x3-matta — hela fyllda blocket
+          drawTile(IMG.houseTiles, rm.floor[0], rm.floor[1], dx, dy);
+          // blå 4x3-matta i vardagsrummet — hela fyllda blocket
           if(IMG.carpet && tx>=RUG.x0 && tx<=RUG.x0+3 && ty>=RUG.y0 && ty<=RUG.y0+2)
             drawTile(IMG.carpet, 4+(tx-RUG.x0), 4+(ty-RUG.y0), dx, dy);
         }
-        else if(iWall && IMG.houseTiles) drawTile(IMG.houseTiles, 4, ty===ROOM.y0-2?6:8, dx, dy);
+        else if(iDoor && IMG.houseTiles) drawTile(IMG.houseTiles, 15, 1, dx, dy);
+        else if(iWall && IMG.houseTiles) drawTile(IMG.houseTiles, rm.wall, ty===RY0-2?6:8, dx, dy);
         else if(iFrame){ ctx.fillStyle='#54331e'; ctx.fillRect(dx, dy, TS, TS);
           ctx.fillStyle='#6b4327'; ctx.fillRect(dx+2, dy+2, TS-4, TS-4); }
         else { ctx.fillStyle='#0d0b09'; ctx.fillRect(dx, dy, TS, TS); }
@@ -1408,12 +1452,15 @@ function draw(){
   actors.push({y:(CHEST.ty+1)*TS-4, chest:true});
   for(const tr of trees) actors.push({y:(tr.ty+1)*TS-2, tree:tr});
   for(const n of nodes) if(!n.brutet) actors.push({y:(n.ty+1)*TS-1, node:n});
+  actors.push({y:(WELL.ty+2)*TS-1, well:true});
   actors.push({y:(FORGE.ty+1)*TS-1, forge:true});
   actors.push({y:(ANVILP.ty+1)*TS-1, anvil:true});
   for(const cr of CRATES){ actors.push({y:(cr.ty+1)*TS-1, crate:cr}); actors.push({y:cr.ty*TS-1, sign:cr}); }
   actors.push({y:(BED.ty+2)*TS-1, bed:true});
-  actors.push({y:ROOM.y0*TS-1, hearth:true}); // eldstad + ljus mot rummets bakvägg
+  actors.push({y:RY0*TS-1, hearth:true}); // all väggfast inredning i alla tre rummen
   actors.push({y:(TABLE.ty+1)*TS-1, table:true});
+  actors.push({y:(RY0+1)*TS-1, piano:true});
+  actors.push({y:45*TS-1, sofa:true});
   for(const s of slimes) actors.push({y:s.y+12, slime:s});
   // staketet y-sorteras med allt annat — annars ritas det tvärs igenom träd och spelare
   for(const [tx,ty] of fences) actors.push({y:(ty+1)*TS, fence:[tx,ty]});
@@ -1437,6 +1484,10 @@ function draw(){
       ctx.drawImage(IMG.chest, 8,0,16,16, CHEST.tx*TS-ox, CHEST.ty*TS-oy-6, 32, 32); // 2x som allt annat
       ctx.fillStyle='#e8c96a'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
       ctx.fillText('SÄLJ', CHEST.tx*TS-ox+16, CHEST.ty*TS-oy-36);
+    } else if(a.well){
+      if(IMG.well) ctx.drawImage(IMG.well, 0, 0, 32, 48, WELL.tx*TS-ox, (WELL.ty+2)*TS-oy-96, 64, 96);
+      ctx.fillStyle='#7ec8e8'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+      ctx.fillText('BRUNN', (WELL.tx+1)*TS-ox, WELL.ty*TS-oy-4);
     } else if(a.forge){
       if(IMG.furnace){
         const f = forge.active ? 1+((time*8|0)%4) : 0;
@@ -1451,32 +1502,48 @@ function draw(){
     } else if(a.bed){
       if(IMG.beds) ctx.drawImage(IMG.beds, 7, 317, 33, 34, BED.tx*TS-ox-1, (BED.ty+2)*TS-oy-68, 66, 68);
     } else if(a.hearth){
-      // brinnande tegelspis mitt på bakväggen + två animerade ljus — mysig glöd
-      const golvY = ROOM.y0*TS-oy;
-      const ecx = 7*TS-ox+16;
+      const golvY = RY0*TS-oy;
+      // — SOVRUM: bokhylla, spegel, ljus —
+      if(IMG.iothers){
+        ctx.drawImage(IMG.iothers, 2, 51, 28, 41, 3.6*TS-ox, golvY-78, 56, 82);
+        ctx.drawImage(IMG.iothers, 2, 3, 12, 26, 11*TS-ox, golvY-72, 24, 52);
+      }
+      const cf = ((time*6|0)%4)*16;
+      if(IMG.candle){
+        ctx.drawImage(IMG.candle, cf, 0, 16, 32, 5.6*TS-ox, golvY-56, 32, 64);
+        ctx.drawImage(IMG.candle, cf, 0, 16, 32, 24.4*TS-ox, golvY-56, 32, 64);
+      }
+      // — KÖK: rosa överskåp, bänkrad, kylskåp, spis/ugn (Part 9, rosa setet) —
+      if(IMG.kitchen){
+        for(let i=0;i<4;i++) ctx.drawImage(IMG.kitchen, (34+(i%3))*16, 0, 16, 16, (15+i*1.3)*TS-ox, golvY-72, 32, 32);
+        for(let i=0;i<4;i++) ctx.drawImage(IMG.kitchen, (34+(i%3))*16, 32, 16, 16, (15+i)*TS-ox, golvY-30, 32, 32);
+        ctx.drawImage(IMG.kitchen, 128, 16, 16, 46, 21*TS-ox, golvY+2-92, 32, 92);
+        ctx.drawImage(IMG.kitchen, 128, 82, 16, 28, 19.6*TS-ox, golvY+2-56, 32, 56);
+      }
+      // — VARDAGSRUM: brinnande spis, TV, tavla, väggur —
+      const ecx = 28*TS-ox+16;
       if(IMG.fireplace){
         ctx.drawImage(IMG.fireplace, 67, 8, 26, 40, ecx-26, golvY-68, 52, 80);
         const f = [7,71,135,199][(time*8|0)%4];
         ctx.drawImage(IMG.fireplace, f, 161, 18, 7, ecx-18, golvY-8, 36, 14);
       }
-      // bokhylla + spegel på väggen (som i inspirationsbilden)
-      if(IMG.iothers){
-        ctx.drawImage(IMG.iothers, 2, 51, 28, 41, 3.6*TS-ox, golvY-78, 56, 82);
-        ctx.drawImage(IMG.iothers, 2, 3, 12, 26, 10.9*TS-ox, golvY-72, 24, 52);
-      }
-      if(IMG.candle){
-        const cf = ((time*6|0)%4)*16;
-        ctx.drawImage(IMG.candle, cf, 0, 16, 32, 5.6*TS-ox, golvY-56, 32, 64);
-        ctx.drawImage(IMG.candle, cf, 0, 16, 32, 9.6*TS-ox, golvY-56, 32, 64);
+      if(IMG.part2) ctx.drawImage(IMG.part2, 2, 2, 28, 22, 25.6*TS-ox, golvY-66, 56, 44);
+      if(IMG.part1){
+        ctx.drawImage(IMG.part1, 33, 2, 27, 18, 30.2*TS-ox, golvY-70, 54, 36);
+        ctx.drawImage(IMG.part1, 178, 2, 12, 16, 26.9*TS-ox, golvY-74, 24, 32);
       }
       // varmt ljus från elden och ljusen
-      for(const [lx, r, bas] of [[ecx, 110, 0.30], [5.6*TS-ox+16, 55, 0.20], [9.6*TS-ox+16, 55, 0.20]]){
+      for(const [lx, r, bas] of [[ecx, 110, 0.30], [5.6*TS-ox+16, 55, 0.20], [24.4*TS-ox+16, 55, 0.20]]){
         const puls = bas + 0.05*Math.sin(time*6 + lx);
         const gl = ctx.createRadialGradient(lx, golvY-18, 6, lx, golvY-18, r);
         gl.addColorStop(0, 'rgba(255,190,90,'+puls.toFixed(2)+')');
         gl.addColorStop(1, 'rgba(255,190,90,0)');
         ctx.fillStyle = gl; ctx.fillRect(lx-r, golvY-18-r, r*2, r*2);
       }
+    } else if(a.piano){
+      if(IMG.iothers) ctx.drawImage(IMG.iothers, 2, 102, 30, 24, 30*TS-ox+2, (RY0+1)*TS-oy-48, 60, 48);
+    } else if(a.sofa){
+      if(IMG.sofa) ctx.drawImage(IMG.sofa, 13, 17, 28, 22, 26*TS-ox+4, 45*TS-oy-44, 56, 44);
     } else if(a.table){
       if(IMG.tables) ctx.drawImage(IMG.tables, 2, 198, 28, 24, TABLE.tx*TS-ox+4, (TABLE.ty+1)*TS-oy-46, 56, 48);
       if(IMG.chairs){
@@ -1678,6 +1745,19 @@ function drawHUD(){
       }
     }
     ctx.textAlign='left';
+    // vattenmätare (blå stjärnbaren ur Bars.png) bredvid hotbaren — fylls nedifrån
+    if(IMG.bars){
+      const wx = hx + tw + 10, wy = hy - 18;
+      ctx.drawImage(IMG.bars, 179, 3, 10, 42, wx, wy, 20, 84);
+      const frac = Math.max(0, Math.min(1, p0.water / maxWater(p0)));
+      const fh = Math.round(58 * frac);
+      ctx.save(); ctx.beginPath(); ctx.rect(wx, wy+84-fh-6, 20, fh+6); ctx.clip();
+      ctx.drawImage(IMG.bars, 131, 3, 10, 42, wx, wy, 20, 84);
+      ctx.restore();
+      ctx.font='bold 10px monospace'; ctx.textAlign='center'; ctx.fillStyle='#7ec8e8';
+      ctx.fillText(p0.water, wx+10, wy+96);
+      ctx.textAlign='left';
+    }
   }
   if(NET.open){
     ctx.font='bold 11px monospace'; ctx.textAlign='right'; ctx.fillStyle='#e8c96a';
