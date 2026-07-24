@@ -13,14 +13,15 @@
   #padUI{justify-content:flex-start;gap:0;touch-action:none}
   #padTop{width:100%;box-sizing:border-box;padding:12px;padding-top:calc(12px + env(safe-area-inset-top));text-align:center;font-size:15px;line-height:1.5;background:#141c10;min-height:52px}
   #padMain{flex:1;width:100%;position:relative;touch-action:none}
-  #stickZone{position:absolute;left:0;top:0;bottom:0;width:52%;touch-action:none}
-  #stickHint{position:absolute;left:26%;top:50%;transform:translate(-50%,-50%);color:#57684a;font-size:13px;text-align:center;pointer-events:none}
-  #stickBase{position:absolute;width:120px;height:120px;border-radius:50%;border:3px solid #4a5c3a;background:rgba(50,70,40,.5);display:none;pointer-events:none}
-  #stickKnob{position:absolute;width:56px;height:56px;border-radius:50%;background:#9aab88;display:none;pointer-events:none}
-  .abtn{position:absolute;border-radius:50%;font-family:monospace;font-weight:bold;color:#1a2416;display:flex;align-items:center;justify-content:center;border:none;touch-action:none;-webkit-tap-highlight-color:transparent}
-  #btnA{right:6%;bottom:16%;width:116px;height:116px;background:#e8c96a;font-size:16px}
-  #btnB{right:30%;bottom:50%;width:90px;height:90px;background:#8fb56a;font-size:13px}
-  .abtn.on{filter:brightness(1.35);transform:scale(.94)}
+  #stickZone{position:absolute;left:0;top:0;bottom:0;right:0;touch-action:none}
+  #stickHint{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);color:#57684a;font-size:13px;text-align:center;pointer-events:none}
+  #stickBase{position:absolute;width:130px;height:130px;border-radius:50%;border:2px solid rgba(154,171,136,.4);background:rgba(50,70,40,.22);display:none;pointer-events:none}
+  #stickKnob{position:absolute;width:58px;height:58px;border-radius:50%;background:rgba(154,171,136,.45);display:none;pointer-events:none}
+  .abtn{position:absolute;border:none;background-color:transparent;background-repeat:no-repeat;image-rendering:pixelated;touch-action:none;-webkit-tap-highlight-color:transparent;padding:0}
+  #btnA{right:12px;bottom:calc(12px + env(safe-area-inset-bottom));width:96px;height:96px}
+  #btnB{right:124px;bottom:calc(12px + env(safe-area-inset-bottom));width:80px;height:80px}
+  .abtn.on{filter:brightness(1.3);transform:scale(.94)}
+  #toolBox{position:absolute;right:10px;top:10px;width:96px;height:96px;pointer-events:none;display:none}
   #padUI.local{background:transparent;pointer-events:none}
   #padUI.local #padTop{display:none}
   #padUI.local #padMain{pointer-events:none}
@@ -45,9 +46,10 @@
 <div id="padUI" class="ol" style="display:none">
   <div id="padTop">Ansluter&hellip;</div>
   <div id="padMain">
-    <div id="stickZone"><div id="stickHint">Dra här för<br>att gå</div><div id="stickBase"></div><div id="stickKnob"></div></div>
-    <button class="abtn" id="btnB">VERKTYG</button>
-    <button class="abtn" id="btnA">ANVÄND</button>
+    <div id="stickZone"><div id="stickHint">Dra var som helst<br>för att gå</div><div id="stickBase"></div><div id="stickKnob"></div></div>
+    <canvas id="toolBox" width="96" height="96"></canvas>
+    <button class="abtn" id="btnB" aria-label="Verktyg"></button>
+    <button class="abtn" id="btnA" aria-label="Använd"></button>
   </div>
 </div>
 <div id="qrPanel"></div>
@@ -312,7 +314,7 @@ function buildCleanTile(img, tx, ty){
 // ===================== PANELER (button.png-teman, 48x48-källor, 16px-hörn) =====================
 // button.png = 11 färgteman à 48px-block: panel {48,16+48*i}, bred knapp {0,...}, kvadrat {96,...}.
 // Beige (i=2) och rosa (i=7) har VIT ytterkant inbakad i arket — därför peach (i=10) + brun (i=0).
-const THEME = { beige:{x:48,y:496}, beigeBtn:{x:0,y:496}, brown:{x:48,y:16}, orange:{x:48,y:400}, square:{x:96,y:496}, squareSel:{x:96,y:400} };
+const THEME = { beige:{x:48,y:496}, beigeBtn:{x:0,y:496}, brown:{x:48,y:16}, orange:{x:48,y:400}, square:{x:96,y:496}, squareSel:{x:96,y:400}, greenBtn:{x:0,y:208} };
 function drawPanel(theme, x, y, w, h){
   const img = IMG.btn; if(!img) return;
   const sx = theme.x, sy = theme.y, c = 16;
@@ -322,9 +324,10 @@ function drawPanel(theme, x, y, w, h){
   S(0,16,c,16, 0,c,c,h-2*c); S(32,16,c,16, w-c,c,c,h-2*c);
   S(16,16,16,16, c,c,w-2*c,h-2*c);
 }
-function drawWideBtn(x, y, w, h){
+function drawWideBtn(x, y, w, h, theme){
   const img = IMG.btn; if(!img) return;
-  const sx = THEME.beigeBtn.x, sy = THEME.beigeBtn.y;
+  const t = theme || THEME.beigeBtn;
+  const sx = t.x, sy = t.y;
   ctx.drawImage(img, sx,sy,16,16, Math.round(x),Math.round(y),16,h);
   ctx.drawImage(img, sx+16,sy,16,16, Math.round(x+16),Math.round(y),w-32,h);
   ctx.drawImage(img, sx+32,sy,16,16, Math.round(x+w-16),Math.round(y),16,h);
@@ -478,21 +481,20 @@ window.addEventListener('keydown', e=>{
 window.addEventListener('keyup', e=>{ keys[e.code]=false; });
 window.addEventListener('blur', ()=>{ for(const k in keys) keys[k]=false; });
 
-const KEYSETS = [
-  {up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD',attack:'Space',special:'KeyE'},
-  {up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',attack:'Enter',special:'ShiftRight'}
-];
+// EN tangentbordsspelare — WASD och pilarna styr samma bonde (två-på-samma-tangentbord var mest störande)
+const KB = { up:['KeyW','ArrowUp'], down:['KeyS','ArrowDown'], left:['KeyA','ArrowLeft'], right:['KeyD','ArrowRight'],
+             attack:['Space','Enter'], special:['KeyE','ShiftRight'] };
 function pads(){ try{ return navigator.getGamepads?navigator.getGamepads():[]; }catch(e){ return []; } }
 const ctrlPrev = {}, CTRL = {};
 let LOCALPAD = false;
 const TCTRL = {x:0,y:0,a:false,s:false};
 function rawCtrl(id){
   if(id[0]==='k'){
-    const ks = KEYSETS[+id[1]];
-    const at = !!keys[ks.attack] || !!kbLatch[ks.attack];
-    const sp = !!keys[ks.special] || !!kbLatch[ks.special];
-    kbLatch[ks.attack] = false; kbLatch[ks.special] = false;
-    return { x:(keys[ks.right]?1:0)-(keys[ks.left]?1:0), y:(keys[ks.down]?1:0)-(keys[ks.up]?1:0), attack:at, special:sp };
+    const ned = a=>a.some(k=>keys[k]);
+    const latch = a=>{ const v = a.some(k=>kbLatch[k]); a.forEach(k=>kbLatch[k]=false); return v; };
+    const at = ned(KB.attack) || latch(KB.attack);
+    const sp = ned(KB.special) || latch(KB.special);
+    return { x:(ned(KB.right)?1:0)-(ned(KB.left)?1:0), y:(ned(KB.down)?1:0)-(ned(KB.up)?1:0), attack:at, special:sp };
   }
   if(id==='t0'){
     let x = TCTRL.x; if(x===0 && TCTRL.xL) x = TCTRL.xL;
@@ -518,7 +520,7 @@ function rawCtrl(id){
   return { x, y, attack:b(0)||b(7), special:b(1)||b(2)||b(6) };
 }
 function pollInputs(){
-  const ids = ['k0','k1', ...Object.keys(NET.ctrls).filter(i=>NET.ctrls[i].alive)];
+  const ids = ['k0', ...Object.keys(NET.ctrls).filter(i=>NET.ctrls[i].alive)];
   if(LOCALPAD) ids.push('t0');
   const gps = pads();
   for(let i=0;i<gps.length;i++) if(gps[i]) ids.push('p'+i);
@@ -603,7 +605,11 @@ function pushStatus(){
     }
     else if(state!=='select'){
       const p = players.find(q=>q.ctrlId===id);
-      if(p) msg = { t:'you', st:'play', cls:p.name, color:p.col, en:Math.round(p.energy), tool:TOOLDEF[p.tool].namn };
+      if(p){
+        const td = TOOLDEF[p.tool];
+        const icp = td.seed ? MANIFEST[td.seed] : MANIFEST['i_'+td.id+'_'+(p.tier[td.id]||0)];
+        msg = { t:'you', st:'play', cls:p.name, color:p.col, en:Math.round(p.energy), tool:td.namn, icp, fr: td.seed?7:0 };
+      }
     }
     netSend(id, msg);
   }
@@ -658,7 +664,23 @@ function enableLocalPad(){
   LOCALPAD = true;
   const p = document.getElementById('padUI');
   p.classList.add('local'); p.style.display='flex';
+  setupPadIcons();
   bindPadControls(TCTRL, ()=>{});
+}
+// riktiga pack-UI-ikoner på pekknapparna: ANVÄND = orange bock, VERKTYG = grön växla-pil
+function setupPadIcons(){
+  const btnSheet = new Image();
+  btnSheet.src = (window.__ASSETDATA && window.__ASSETDATA['UI/button.png']) || '/assets/UI/button.png';
+  btnSheet.onload = ()=>{
+    const stil = (el, cellX, cellY)=>{
+      const Z = (el.offsetWidth||80)/16;
+      el.style.backgroundImage = 'url("'+btnSheet.src+'")';
+      el.style.backgroundSize = (btnSheet.naturalWidth*Z)+'px '+(btnSheet.naturalHeight*Z)+'px';
+      el.style.backgroundPosition = (-cellX*16*Z)+'px '+(-cellY*16*Z)+'px';
+    };
+    stil(document.getElementById('btnA'), 26, 25);
+    stil(document.getElementById('btnB'), 39, 13);
+  };
 }
 let ctrlStarted = false;
 function startCtrl(code){
@@ -668,6 +690,23 @@ function startCtrl(code){
   document.getElementById('chooseUI').style.display='none';
   const padUI=document.getElementById('padUI'); padUI.style.display='flex';
   const top=document.getElementById('padTop');
+  setupPadIcons();
+  // stor verktygsruta uppe till höger: slot-ruta + valt verktyg
+  const tb = document.getElementById('toolBox'), tctx = tb.getContext('2d');
+  tctx.imageSmoothingEnabled = false;
+  let tbNyckel = '';
+  const ritaTool = (icp, fr)=>{
+    if(!icp) return;
+    const nyckel = icp+'|'+fr;
+    const slot = loadImg('UI/Inventory/Slots.png'), ikon = loadImg(icp);
+    const rita = ()=>{
+      tctx.clearRect(0,0,96,96);
+      if(slot.complete && slot.naturalWidth) tctx.drawImage(slot, 151, 6, 18, 18, 0, 0, 96, 96);
+      if(ikon.complete && ikon.naturalWidth) tctx.drawImage(ikon, fr*16, 0, 16, 16, 16, 16, 64, 64);
+    };
+    rita();
+    if(nyckel!==tbNyckel){ tbNyckel = nyckel; slot.onload = rita; ikon.onload = rita; }
+  };
   const st={x:0,y:0,a:false,s:false};
   let conn=null, connected=false, attempts=0;
   const send=()=>{ if(connected){ try{ conn.send({t:'i',x:Math.round(st.x*100)/100,y:Math.round(st.y*100)/100,a:st.a,s:st.s}); }catch(e){} } };
@@ -697,7 +736,11 @@ function startCtrl(code){
         nmFragad = false;
         top.innerHTML='<span style="color:'+d.color+'">&#9632; '+d.cls+'</span>'+(d.ready?' — <b style="color:#8fb56a">REDO!</b>':' — styr åt sidorna: byt bonde · VERKTYG: bygg egen · ANVÄND: vidare');
       }
-      else top.innerHTML='<span style="color:'+d.color+'">&#9632; '+d.cls+'</span> · Energi '+d.en+' · Verktyg: <b>'+d.tool+'</b> (VERKTYG byter)';
+      else {
+        top.innerHTML='<span style="color:'+d.color+'">&#9632; '+d.cls+'</span> · Energi '+d.en+' · <b>'+d.tool+'</b>';
+        tb.style.display='block';
+        ritaTool(d.icp, d.fr||0);
+      }
     });
     conn.on('close', ()=>{ if(connected){ connected=false; top.innerHTML='<b style="color:#ff8a6a">Tappade anslutningen.</b> Försöker igen…'; setTimeout(tryConnect,2000); } });
     conn.on('error', ()=>{});
@@ -751,7 +794,7 @@ function makePlayer(i, ctrlId, def, name){
 }
 function scanForJoiners(){
   const used = new Set([...joiners.map(j=>j.ctrlId), ...players.map(p=>p.ctrlId)]);
-  const cand = ['k0','k1', ...Object.keys(NET.ctrls).filter(i=>NET.ctrls[i].alive)];
+  const cand = ['k0', ...Object.keys(NET.ctrls).filter(i=>NET.ctrls[i].alive)];
   if(LOCALPAD) cand.push('t0');
   const gps = pads();
   for(let i=0;i<gps.length;i++) if(gps[i]) cand.push('p'+i);
@@ -759,7 +802,7 @@ function scanForJoiners(){
     if(used.has(id)) continue;
     if(C(id).aJP && players.length+joiners.length<5){
       const ci = (players.length+joiners.length)%5;
-      const j = { ctrlId:id, ci, def:{...PRESETS[ci]}, step:'pick', row:0, name:'', ready:false, fresh:true, nmSkickad:false };
+      const j = { ctrlId:id, ci, def:{...PRESETS[ci]}, step:'build', row:5, name:'', ready:false, fresh:true, nmSkickad:false };
       preloadDef(j.def);
       joiners.push(j);
     }
@@ -976,7 +1019,7 @@ function finishName(j){
 // tangentbordsspelare skriver namnet direkt
 window.addEventListener('keydown', e=>{
   if(state!=='select') return;
-  const j = joiners.find(j2=>(j2.ctrlId==='k0'||j2.ctrlId==='k1') && j2.step==='name');
+  const j = joiners.find(j2=>j2.ctrlId==='k0' && j2.step==='name');
   if(!j) return;
   if(e.key==='Backspace'){ j.name = j.name.slice(0,-1); e.preventDefault(); }
   else if(e.key==='Enter'){ /* aJP för k1 sköter det — men fånga för k0 också */ }
@@ -1057,7 +1100,7 @@ function updPlayer(p, dt){
   if(c.aJP) useTool(p);
   if(c.sJP){ p.tool = (p.tool+1)%TOOLDEF.length; ftext(p.x, p.y-40, TOOLDEF[p.tool].namn, '#f2ead6'); }
   // sifferknappar (tangentbord) — latchade så snabba tryck aldrig missas
-  if(p.ctrlId==='k0'||p.ctrlId==='k1'){
+  if(p.ctrlId==='k0'){
     for(let i=0;i<TOOLDEF.length;i++){
       const code = 'Digit'+(i+1);
       if(keys[code]||kbLatch[code]){ p.tool=i; kbLatch[code]=false; }
@@ -1077,29 +1120,21 @@ function update(dt){
     for(const j of joiners){
       const c = C(j.ctrlId);
       if(j.fresh){ j.fresh=false; continue; }
-      if(j.step==='pick'){
-        if(c.lJP){ j.ci = (j.ci+4)%5; j.def = {...PRESETS[j.ci]}; preloadDef(j.def); }
-        if(c.rJP){ j.ci = (j.ci+1)%5; j.def = {...PRESETS[j.ci]}; preloadDef(j.def); }
-        if(c.sJP){ j.step = 'build'; j.row = 0; }
-        else if(c.aJP) startNameStep(j);
-      } else if(j.step==='build'){
-        if(c.uJP) j.row = (j.row+4)%5;
-        if(c.dJP) j.row = (j.row+1)%5;
+      if(j.step==='build'){
+        if(c.uJP) j.row = (j.row+5)%6;
+        if(c.dJP) j.row = (j.row+1)%6;
         const rikt = c.lJP ? -1 : c.rJP ? 1 : 0;
-        if(rikt){ adjustDef(j.def, j.row, rikt); preloadDef(j.def); }
-        if(c.sJP) j.step = 'pick';
-        else if(c.aJP) startNameStep(j);
+        if(rikt && j.row<5){ adjustDef(j.def, j.row, rikt); preloadDef(j.def); }
+        if(c.sJP){ j.ci = (j.ci+1)%5; j.def = {...PRESETS[j.ci]}; preloadDef(j.def); } // VERKTYG = byt bas-look
+        if(c.aJP) startNameStep(j);
       } else if(j.step==='name'){
         if(c.aJP) finishName(j);
       } else if(j.step==='ready'){
-        if(c.sJP){ j.step = 'pick'; j.ready = false; }
+        if(c.sJP){ j.step = 'build'; j.ready = false; }
       }
     }
     joiners = joiners.filter(j=>!j.remove);
-    if(joiners.length>0 && joiners.every(j=>j.ready)){
-      selCount -= dt;
-      if(selCount<=0) startGame();
-    } else selCount = 2;
+    if(joiners.length>0 && joiners.every(j=>j.ready)) startGame(); // ingen räknare — kör direkt!
     return;
   }
   if(paused) return;
@@ -1662,66 +1697,68 @@ function drawSelect(){
   if(IMG.tree) for(const [bx,by] of [[46,VH-10],[914,VH-10],[976,190]])
     ctx.drawImage(IMG.tree, 0, 48, 32, 48, bx-32, by-96, 64, 96);
   drawTitle();
-  // bondekort på paneler ur paketet — inga namn, bygg din egen!
-  const cw=150, gap=14, total=5*cw+4*gap, sx0=(VW-total)/2;
-  for(let i=0;i<5;i++){
-    const x = sx0+i*(cw+gap), y = 210, h = 170;
-    const agare = joiners.find(j=>j.ci===i);
-    drawPanel(agare ? THEME.orange : THEME.beige, x, y, cw, h);
-    const def = agare ? agare.def : PRESETS[i];
-    const fi = Math.floor(time*5)%4;
-    drawModChar(ctx, def, 'idle', 0, fi, x+cw/2-48, y+14, 3, 0);
-    if(agare){
-      const pi = joiners.indexOf(agare);
-      ctx.font='bold 12px monospace'; ctx.textAlign='center'; ctx.fillStyle=CHARCOLS[agare.ci];
-      const status = agare.step==='build' ? 'byggs…' : agare.step==='name' ? 'skriver namn…' : agare.ready ? '✓ REDO' : '';
-      ctx.fillText('Spelare '+(pi+1)+' '+status, x+cw/2, y+h+16);
-      if(agare.step==='build'){
-        // byggpanel på kortets nederdel — förhandsvisningen syns ovanför och uppdateras live
-        drawPanel(THEME.beige, x-16, y+56, cw+32, 130);
-        ctx.textAlign='left';
+  // ===== karaktärsskaparen — direkt när man gått med =====
+  const fi = Math.floor(time*5)%4;
+  if(joiners.length===0){
+    // ingen med än: visa en glad bonde + stor inbjudan
+    drawModChar(ctx, PRESETS[Math.floor(time/2)%5], 'idle', 0, fi, VW/2-64, 200, 4, 0);
+    drawWideBtn(VW/2-230, 380, 460, 46, THEME.greenBtn);
+    ctx.font='bold 17px monospace'; ctx.textAlign='center'; ctx.fillStyle='#14310e';
+    ctx.fillText('Tryck ANVÄND / Blanksteg för att gå med!', VW/2, 409);
+  } else {
+    const colW = Math.min(320, (VW-20)/joiners.length);
+    const startX = (VW - colW*joiners.length)/2;
+    joiners.forEach((j,ji)=>{
+      const cx = startX + colW*ji + colW/2;
+      ctx.font='bold 13px monospace'; ctx.textAlign='center'; ctx.fillStyle=CHARCOLS[j.ci];
+      ctx.fillText(j.name || 'Spelare '+(ji+1), cx, 200);
+      // STOR bonde i mitten så man tydligt ser vad man byter till
+      drawModChar(ctx, j.def, 'idle', 0, fi, cx-80, 176, 5, 0);
+      if(j.step==='build'){
         BUILDROWS.forEach((r,ri)=>{
-          const ry = y+78+ri*20;
-          if(ri===agare.row){ drawWideBtn(x-8, ry-13, cw+16, 19); }
-          ctx.font='bold 11px monospace'; ctx.fillStyle='#3a2a1a';
-          ctx.fillText(r.namn, x-4, ry);
-          ctx.textAlign='right';
-          ctx.fillText('‹'+r.visa(agare.def)+'›', x+cw+4, ry);
-          ctx.textAlign='left';
+          const ry = 348 + ri*22;
+          if(ri===j.row) drawWideBtn(cx-colW/2+12, ry-14, colW-24, 21);
+          ctx.font='bold 11px monospace'; ctx.textAlign='left'; ctx.fillStyle='#2a3c22';
+          ctx.fillText(r.namn, cx-colW/2+22, ry);
+          if(IMG.btn){
+            ctx.drawImage(IMG.btn, 36*16, 400, 16, 16, cx-10, ry-13, 17, 17);
+            ctx.drawImage(IMG.btn, 35*16, 400, 16, 16, cx+colW/2-40, ry-13, 17, 17);
+          }
+          ctx.textAlign='center'; ctx.font='bold 11px monospace'; ctx.fillStyle='#14310e';
+          ctx.fillText(r.visa(j.def), cx+(colW/2-40-10)/2+10, ry);
         });
-        ctx.font='9px monospace'; ctx.fillStyle='#6a5a42'; ctx.textAlign='center';
-        ctx.fillText('upp/ner: rad · vä/hö: ändra · ANVÄND: klar', x+cw/2, y+180);
-      } else if(agare.step==='name' && (agare.ctrlId==='k0'||agare.ctrlId==='k1')){
-        drawPanel(THEME.beige, x-14, y+30, cw+28, 66);
-        ctx.font='bold 12px monospace'; ctx.textAlign='center'; ctx.fillStyle='#3a2a1a';
-        ctx.fillText('Skriv ditt namn:', x+cw/2, y+50);
-        drawWideBtn(x-4, y+58, cw+8, 24);
+        const bh = j.row===5 ? 46 : 40, by = 454 - (j.row===5?3:0);
+        drawWideBtn(cx-colW/2+16, by, colW-32, bh, THEME.greenBtn);
+        ctx.font='bold '+(j.row===5?17:15)+'px monospace'; ctx.textAlign='center'; ctx.fillStyle='#14310e';
+        ctx.fillText('SPELA!', cx, by+bh/2+5);
+      } else if(j.step==='name' && j.ctrlId==='k0'){
+        drawPanel(THEME.beige, cx-110, 348, 220, 90);
+        ctx.font='bold 13px monospace'; ctx.textAlign='center'; ctx.fillStyle='#3a2a1a';
+        ctx.fillText('Skriv ditt namn:', cx, 370);
+        drawWideBtn(cx-96, 380, 192, 26);
         const blink = (time*2|0)%2===0 ? '_' : ' ';
-        ctx.fillText((agare.name||'')+blink, x+cw/2, y+75);
-        ctx.font='9px monospace'; ctx.fillStyle='#6a5a42';
-        ctx.fillText('(tomt = Bonde #'+(joiners.indexOf(agare)+1)+') · ANVÄND = klar', x+cw/2, y+91);
-      } else if(agare.step==='name'){
-        ctx.font='11px monospace'; ctx.fillStyle='#3a2a1a';
-        ctx.fillText('(skriver på mobilen…)', x+cw/2, y+h+32);
+        ctx.fillText((j.name||'')+blink, cx, 398);
+        ctx.font='10px monospace'; ctx.fillStyle='#6a5a42';
+        ctx.fillText('(tomt = Bonde #'+(ji+1)+') · ANVÄND = klar', cx, 424);
+      } else if(j.step==='name'){
+        ctx.font='bold 12px monospace'; ctx.textAlign='center'; ctx.fillStyle='#2a3c22';
+        ctx.fillText('(skriver namn på mobilen…)', cx, 380);
+      } else if(j.step==='ready'){
+        ctx.font='bold 15px monospace'; ctx.textAlign='center'; ctx.fillStyle='#2a7a2a';
+        ctx.fillText('✓ REDO — väntar på de andra…', cx, 380);
       }
-    }
+    });
   }
-  // prompt på träknapp
-  const allReady = joiners.length>0 && joiners.every(j=>j.ready);
-  drawWideBtn(VW/2-190, 428, 380, 36);
-  ctx.font='bold 15px monospace'; ctx.textAlign='center'; ctx.fillStyle='#3a2a1a';
-  if(allReady) ctx.fillText('Startar om '+Math.ceil(selCount)+'…', VW/2, 452);
-  else ctx.fillText('Tryck ANVÄND / Blanksteg för att gå med!', VW/2, 452);
   if(savedInfo && (savedInfo.v===2||savedInfo.v===3)){
     ctx.font='bold 12px monospace'; ctx.fillStyle='#f2ead6';
     ctx.fillText('Sparad gård finns (dag '+(savedInfo.dag||1)+') — fortsätter automatiskt · N = börja om', VW/2, 480);
   }
-  if(NET.open){
+  if(NET.open && joiners.length===0){
     ctx.font='bold 13px monospace'; ctx.fillStyle='#1f4d2a';
-    ctx.fillText('Mobil: skanna QR-koden eller öppna '+joinLink().replace('http://',''), VW/2, VH-46);
+    ctx.fillText('Mobil: skanna QR-koden eller öppna '+joinLink().replace(/^https?:\/\//,''), VW/2, VH-46);
   }
   ctx.font='11px monospace'; ctx.fillStyle='#2a5c34';
-  ctx.fillText('Vä/hö: byt bonde · VERKTYG (E/Hö.Shift): bygg egen · ANVÄND: vidare → skriv namn · Grafik: Farm RPG av EmanuelleDev', VW/2, VH-16);
+  ctx.fillText('Pilar/WASD: välj & ändra · VERKTYG (E): byt bas-look · ANVÄND: vidare · Grafik: Farm RPG av EmanuelleDev', VW/2, VH-16);
 }
 
 // ===================== DEBUG-HOOKS =====================
