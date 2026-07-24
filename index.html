@@ -159,6 +159,8 @@ MANIFEST.houseTiles = 'Tileset/Tileset House.png';
 MANIFEST.beds = 'Objects/Interior/Beds.png';
 MANIFEST.fireplace = 'Objects/Interior/Fireplace.png';
 MANIFEST.candle = 'Objects/Interior/Candle 1.png';
+MANIFEST.tables = 'Objects/Interior/Tables and desks.png';
+MANIFEST.chairs = 'Objects/Interior/Chairs.png';
 const TIERDIR = ['1. Wood', '2. Cooper']; // OBS: packmakaren stavar koppar "Cooper" — och kannan olika per mapp
 const TIERTOOLS = [
   { hoe:'Hoe.png', can:'Watering can.png', axe:'Axe.png', pick:'Pickaxe.png', sword:'Sword.png' },
@@ -355,6 +357,7 @@ const DOOR_SPAWN = { tx:6, ty:9 };
 const ROOM_ENTRY = { tx:7, ty:45 };
 const ROOM_EXIT = { tx:7, ty:46 };  // kliv på mattan → ut igen
 const BED = { tx:10, ty:42 };       // dubbelsäng 2x2
+const TABLE = { tx:5, ty:44 };      // matbord 2x1 med stolar på sidorna
 // kind: 0 gräs, 1 jordstig, 2 vatten, 3 blockerad(osynlig), 4 odlingsjord
 const map = [];
 const solidAt = (tx,ty)=>{
@@ -416,6 +419,7 @@ function buildMap(){
   for(let y=WORLD_H;y<MH;y++) for(let x=0;x<MW;x++) set(x,y,3);
   for(let y=ROOM.y0;y<=ROOM.y1;y++) for(let x=ROOM.x0;x<=ROOM.x1;x++) set(x,y,0);
   set(BED.tx,BED.ty,3); set(BED.tx+1,BED.ty,3); set(BED.tx,BED.ty+1,3); set(BED.tx+1,BED.ty+1,3);
+  set(TABLE.tx,TABLE.ty,3); set(TABLE.tx+1,TABLE.ty,3);
   set(DOOR_OUT.tx, DOOR_OUT.ty, 0); set(DOOR_OUT.tx+1, DOOR_OUT.ty, 0); // dörröppning 2 tiles bred
   // träd i hörnen och längs kanterna
   const spots = [[24,3],[28,2],[33,4],[38,3],[40,8],[3,12],[2,18],[4,24],[9,25],[40,17],[36,12],[25,25],[31,26]];
@@ -832,6 +836,7 @@ function startGame(){
     for(let y=ROOM.y0;y<=ROOM.y1;y++) for(let x=ROOM.x0;x<=ROOM.x1;x++) map[y*MW+x].kind = 0;
     map[BED.ty*MW+BED.tx].kind=3; map[BED.ty*MW+BED.tx+1].kind=3;
     map[(BED.ty+1)*MW+BED.tx].kind=3; map[(BED.ty+1)*MW+BED.tx+1].kind=3;
+    map[TABLE.ty*MW+TABLE.tx].kind=3; map[TABLE.ty*MW+TABLE.tx+1].kind=3;
     map[DOOR_OUT.ty*MW+DOOR_OUT.tx].kind = 0; map[DOOR_OUT.ty*MW+DOOR_OUT.tx+1].kind = 0;
     for(const cr of CRATES){ map[cr.ty*MW+cr.tx].kind = 3; map[(cr.ty-1)*MW+cr.tx].kind = 3; }
     map[CHEST.ty*MW+CHEST.tx].kind = 3;
@@ -1302,9 +1307,20 @@ function drawPlayer(p, ox, oy){
   const fi = p.busy>0 ? Math.min(an.frames-1, Math.floor(p.animT*an.fps)) : Math.floor(p.animT*an.fps)%an.frames;
   const td = TOOLDEF[p.tool];
   drawModChar(ctx, p.def, ak, p.dir, fi, Math.round(sx)-32, Math.round(sy)-38, 2, td && td.id ? p.tier[td.id] : 0);
-  // den senast plockade grödan syns över huvudet medan man bär
-  if(carryN>0 && p.busy<=0 && p.lastCrop && IMG[p.lastCrop])
-    ctx.drawImage(IMG[p.lastCrop], 7*16, 0, 16, 16, Math.round(sx)-14, Math.round(sy)-54, 28, 28);
+  // allt man bär visas centrerat över huvudet — en ikon per gröda med antal i hörnet
+  if(carryN>0 && p.busy<=0){
+    const typer = Object.keys(p.carry).filter(id=>p.carry[id]>0);
+    let ix = Math.round(sx) - typer.length*13;
+    for(const id of typer){
+      if(IMG[id]) ctx.drawImage(IMG[id], 7*16, 0, 16, 16, ix, Math.round(sy)-56, 24, 24);
+      if(p.carry[id]>1){
+        ctx.font='bold 9px monospace'; ctx.textAlign='right';
+        ctx.fillStyle='#141c10'; ctx.fillText(p.carry[id]+'x', ix+24, Math.round(sy)-32);
+        ctx.fillStyle='#ffffff'; ctx.fillText(p.carry[id]+'x', ix+23, Math.round(sy)-33);
+      }
+      ix += 26;
+    }
+  }
   // namnskylt (bra när hela familjen springer runt)
   ctx.font='bold 10px monospace'; ctx.textAlign='center';
   ctx.fillStyle='#141c10'; ctx.fillText(p.name, Math.round(sx)+1, Math.round(sy)-41);
@@ -1335,7 +1351,7 @@ function draw(){
         const iRoom = tx>=ROOM.x0 && tx<=ROOM.x1 && ty>=ROOM.y0 && ty<=ROOM.y1;
         const iWall = tx>=ROOM.x0 && tx<=ROOM.x1 && (ty===ROOM.y0-2 || ty===ROOM.y0-1);
         const iFrame = tx>=ROOM.x0-1 && tx<=ROOM.x1+1 && ty>=ROOM.y0-3 && ty<=ROOM.y1+1;
-        if(iRoom && IMG.houseTiles) drawTile(IMG.houseTiles, 4+(tx&1), ty&1, dx, dy);
+        if(iRoom && IMG.houseTiles) drawTile(IMG.houseTiles, 15, 1, dx, dy); // mörkt rödbrunt tegel som i inspirationsbilden
         else if(iWall && IMG.houseTiles) drawTile(IMG.houseTiles, 4, ty===ROOM.y0-2?6:8, dx, dy);
         else if(iFrame){ ctx.fillStyle='#54331e'; ctx.fillRect(dx, dy, TS, TS);
           ctx.fillStyle='#6b4327'; ctx.fillRect(dx+2, dy+2, TS-4, TS-4); }
@@ -1389,6 +1405,7 @@ function draw(){
   for(const cr of CRATES){ actors.push({y:(cr.ty+1)*TS-1, crate:cr}); actors.push({y:cr.ty*TS-1, sign:cr}); }
   actors.push({y:(BED.ty+2)*TS-1, bed:true});
   actors.push({y:ROOM.y0*TS-1, hearth:true}); // eldstad + ljus mot rummets bakvägg
+  actors.push({y:(TABLE.ty+1)*TS-1, table:true});
   for(const s of slimes) actors.push({y:s.y+12, slime:s});
   // staketet y-sorteras med allt annat — annars ritas det tvärs igenom träd och spelare
   for(const [tx,ty] of fences) actors.push({y:(ty+1)*TS, fence:[tx,ty]});
@@ -1426,14 +1443,13 @@ function draw(){
     } else if(a.bed){
       if(IMG.beds) ctx.drawImage(IMG.beds, 7, 317, 33, 34, BED.tx*TS-ox-1, (BED.ty+2)*TS-oy-68, 66, 68);
     } else if(a.hearth){
-      // brinnande eldstad mitt på bakväggen + två animerade ljus — mysig glöd
+      // brinnande tegelspis mitt på bakväggen + två animerade ljus — mysig glöd
       const golvY = ROOM.y0*TS-oy;
       const ecx = 7*TS-ox+16;
       if(IMG.fireplace){
-        ctx.drawImage(IMG.fireplace, 68, 83, 24, 29, ecx-24, golvY-58, 48, 58);
-        const FL = [[7,161,22,14],[71,161,25,14],[130,161,23,14],[199,161,24,14]];
-        const f = FL[(time*8|0)%4];
-        ctx.drawImage(IMG.fireplace, f[0], f[1], f[2], f[3], ecx-f[2], golvY-26, f[2]*2, f[3]*2);
+        ctx.drawImage(IMG.fireplace, 67, 8, 26, 40, ecx-26, golvY-68, 52, 80);
+        const f = [7,71,135,199][(time*8|0)%4];
+        ctx.drawImage(IMG.fireplace, f, 161, 18, 7, ecx-18, golvY-8, 36, 14);
       }
       if(IMG.candle){
         const cf = ((time*6|0)%4)*16;
@@ -1447,6 +1463,12 @@ function draw(){
         gl.addColorStop(0, 'rgba(255,190,90,'+puls.toFixed(2)+')');
         gl.addColorStop(1, 'rgba(255,190,90,0)');
         ctx.fillStyle = gl; ctx.fillRect(lx-r, golvY-18-r, r*2, r*2);
+      }
+    } else if(a.table){
+      if(IMG.tables) ctx.drawImage(IMG.tables, 2, 198, 28, 24, TABLE.tx*TS-ox+4, (TABLE.ty+1)*TS-oy-46, 56, 48);
+      if(IMG.chairs){
+        ctx.drawImage(IMG.chairs, 160, 4, 16, 24, (TABLE.tx-1)*TS-ox, (TABLE.ty+1)*TS-oy-46, 32, 48);
+        ctx.drawImage(IMG.chairs, 176, 4, 16, 24, (TABLE.tx+2)*TS-ox, (TABLE.ty+1)*TS-oy-46, 32, 48);
       }
     } else if(a.sign){
       const cr = a.sign;
