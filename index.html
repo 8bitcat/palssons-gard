@@ -161,6 +161,8 @@ MANIFEST.fireplace = 'Objects/Interior/Fireplace.png';
 MANIFEST.candle = 'Objects/Interior/Candle 1.png';
 MANIFEST.tables = 'Objects/Interior/Tables and desks.png';
 MANIFEST.chairs = 'Objects/Interior/Chairs.png';
+MANIFEST.carpet = 'Tileset/carpet.png';
+MANIFEST.iothers = 'Objects/Interior/Others.png';
 const TIERDIR = ['1. Wood', '2. Cooper']; // OBS: packmakaren stavar koppar "Cooper" — och kannan olika per mapp
 const TIERTOOLS = [
   { hoe:'Hoe.png', can:'Watering can.png', axe:'Axe.png', pick:'Pickaxe.png', sword:'Sword.png' },
@@ -357,7 +359,8 @@ const DOOR_SPAWN = { tx:6, ty:9 };
 const ROOM_ENTRY = { tx:7, ty:45 };
 const ROOM_EXIT = { tx:7, ty:46 };  // kliv på mattan → ut igen
 const BED = { tx:10, ty:42 };       // dubbelsäng 2x2
-const TABLE = { tx:5, ty:44 };      // matbord 2x1 med stolar på sidorna
+const TABLE = { tx:4, ty:44 };      // matbord 2x1 med stolar på sidorna
+const RUG = { x0:6, y0:43 };        // blå 4x3-matta (carpet-arkets fyllda block kol 4–7, rad 4–6)
 // kind: 0 gräs, 1 jordstig, 2 vatten, 3 blockerad(osynlig), 4 odlingsjord
 const map = [];
 const solidAt = (tx,ty)=>{
@@ -1351,7 +1354,12 @@ function draw(){
         const iRoom = tx>=ROOM.x0 && tx<=ROOM.x1 && ty>=ROOM.y0 && ty<=ROOM.y1;
         const iWall = tx>=ROOM.x0 && tx<=ROOM.x1 && (ty===ROOM.y0-2 || ty===ROOM.y0-1);
         const iFrame = tx>=ROOM.x0-1 && tx<=ROOM.x1+1 && ty>=ROOM.y0-3 && ty<=ROOM.y1+1;
-        if(iRoom && IMG.houseTiles) drawTile(IMG.houseTiles, 15, 1, dx, dy); // mörkt rödbrunt tegel som i inspirationsbilden
+        if(iRoom && IMG.houseTiles){
+          drawTile(IMG.houseTiles, 15, 1, dx, dy); // mörkt rödbrunt tegel som i inspirationsbilden
+          // blå 4x3-matta — hela fyllda blocket
+          if(IMG.carpet && tx>=RUG.x0 && tx<=RUG.x0+3 && ty>=RUG.y0 && ty<=RUG.y0+2)
+            drawTile(IMG.carpet, 4+(tx-RUG.x0), 4+(ty-RUG.y0), dx, dy);
+        }
         else if(iWall && IMG.houseTiles) drawTile(IMG.houseTiles, 4, ty===ROOM.y0-2?6:8, dx, dy);
         else if(iFrame){ ctx.fillStyle='#54331e'; ctx.fillRect(dx, dy, TS, TS);
           ctx.fillStyle='#6b4327'; ctx.fillRect(dx+2, dy+2, TS-4, TS-4); }
@@ -1451,13 +1459,18 @@ function draw(){
         const f = [7,71,135,199][(time*8|0)%4];
         ctx.drawImage(IMG.fireplace, f, 161, 18, 7, ecx-18, golvY-8, 36, 14);
       }
+      // bokhylla + spegel på väggen (som i inspirationsbilden)
+      if(IMG.iothers){
+        ctx.drawImage(IMG.iothers, 2, 51, 28, 41, 3.6*TS-ox, golvY-78, 56, 82);
+        ctx.drawImage(IMG.iothers, 2, 3, 12, 26, 10.9*TS-ox, golvY-72, 24, 52);
+      }
       if(IMG.candle){
         const cf = ((time*6|0)%4)*16;
-        ctx.drawImage(IMG.candle, cf, 0, 16, 32, 4.2*TS-ox, golvY-56, 32, 64);
-        ctx.drawImage(IMG.candle, cf, 0, 16, 32, 10.3*TS-ox, golvY-56, 32, 64);
+        ctx.drawImage(IMG.candle, cf, 0, 16, 32, 5.6*TS-ox, golvY-56, 32, 64);
+        ctx.drawImage(IMG.candle, cf, 0, 16, 32, 9.6*TS-ox, golvY-56, 32, 64);
       }
       // varmt ljus från elden och ljusen
-      for(const [lx, r, bas] of [[ecx, 110, 0.30], [4.2*TS-ox+16, 55, 0.20], [10.3*TS-ox+16, 55, 0.20]]){
+      for(const [lx, r, bas] of [[ecx, 110, 0.30], [5.6*TS-ox+16, 55, 0.20], [9.6*TS-ox+16, 55, 0.20]]){
         const puls = bas + 0.05*Math.sin(time*6 + lx);
         const gl = ctx.createRadialGradient(lx, golvY-18, 6, lx, golvY-18, r);
         gl.addColorStop(0, 'rgba(255,190,90,'+puls.toFixed(2)+')');
