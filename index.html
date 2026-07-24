@@ -412,13 +412,25 @@ const POND = { x0:35, y0:22, x1:39, y1:25 };
 let customMaps = {};
 try{ customMaps = JSON.parse(localStorage.getItem('gard-maps'))||{}; }catch(e){}
 let valdKarta = localStorage.getItem('gard-valdkarta') || '';
-if(valdKarta && !customMaps[valdKarta]) valdKarta = '';
+// kartor från servern (delade mellan localhost/LAN/alla enheter) — webben faller tillbaka på localStorage
+fetch('/api/maps').then(r=>r.json()).then(j=>{ customMaps = Object.assign({}, customMaps, j||{}); }).catch(()=>{});
 let monsterSpawns = null;   // slime-placeringar från kartan (blir levande varje morgon)
+let decorObjs = [];         // fritt klippta sprites från mapeditorn (statisk dekor)
+// staketets autotile-bitar (mask N1 E2 S4 W8) + grannkarta för kartbyggda staket
+const FENCE_LUT = { 0:[1,4],1:[1,4],2:[1,2],3:[0,2],4:[1,3],5:[0,1],6:[0,0],7:[0,1],8:[1,2],9:[2,2],10:[1,2],11:[1,2],12:[2,0],13:[2,1],14:[1,2],15:[1,2] };
+let fenceAutoSet = new Set();
 const START = { x:0, y:0 }; // spelarnas startpunkt (sätts av buildMap)
 
 function buildMap(){
   const rng = mulberry32(77);
-  map.length = 0; trees = []; fences = []; nodes = []; slimes = []; monsterSpawns = null;
+  map.length = 0; trees = []; fences = []; nodes = []; slimes = []; monsterSpawns = null; decorObjs = [];
+  fenceAutoSet = new Set();
+  // återställ systemobjektens standardpositioner (egna kartor flyttar dem)
+  HOUSE.tx=3; HOUSE.ty=2; HOUSE.img='house';
+  CHEST.tx=16; CHEST.ty=7; FORGE.tx=12; FORGE.ty=4; ANVILP.tx=15; ANVILP.ty=4; WELL.tx=18; WELL.ty=6;
+  DOOR_OUT.tx=5; DOOR_OUT.ty=8; DOOR_SPAWN.tx=6; DOOR_SPAWN.ty=9;
+  [[11,7],[12,7],[13,7]].forEach(([cx,cy],i)=>{ CRATES[i].tx=cx; CRATES[i].ty=cy; CRATES[i].flyttad=false; });
+  FIELD.x0=12; FIELD.y0=11; FIELD.x1=32; FIELD.y1=21;
   for(let y=0;y<MH;y++) for(let x=0;x<MW;x++){
     map.push({ kind:0, g:(rng()<0.12?1:0)+(rng()<0.06?2:0), soil:null });
   }
@@ -462,22 +474,39 @@ function buildCustom(km, set){
     else if(o.t==='ugn'){ FORGE.tx=x; FORGE.ty=y; set(x,y,3); ugn=true; }
     else if(o.t==='stad'){ ANVILP.tx=x; ANVILP.ty=y; set(x,y,3); stad=true; }
     else if(o.t==='brunn'){ WELL.tx=x; WELL.ty=y; set(x,y,3); set(x+1,y,3); set(x,y+1,3); set(x+1,y+1,3); brunn=true; }
-    else if(lador[o.t]!==undefined){ const cr = CRATES[lador[o.t]]; cr.tx=x; cr.ty=y; set(x,y,3); set(x,y-1,3); }
+    else if(lador[o.t]!==undefined){ const cr = CRATES[lador[o.t]]; cr.tx=x; cr.ty=y; cr.flyttad=true; set(x,y,3); set(x,y-1,3); }
+    else if(o.t==='staket'){ fences.push([x,y,'a']); set(x,y,3); }
     else if(o.t==='staketh'){ fences.push([x,y,true]); set(x,y,3); }
     else if(o.t==='staketv'){ fences.push([x,y,false]); set(x,y,3); }
     else if(o.t && o.t.startsWith('slime')){ monsterSpawns.push({x:x*TS+16, y:y*TS+16}); }
+    else if(o.t==='fri' && o.p && o.r){ // fritt klippt sprite: statisk dekor, foten blockerar
+      const fw = Math.max(1, Math.round(o.r[2]*2/TS)), fh = Math.max(1, Math.round(o.r[3]*2/TS));
+      decorObjs.push({ p:o.p, r:o.r, tx:x, ty:y, fw, fh });
+      for(let dx2=0; dx2<fw; dx2++) set(x+dx2, y+fh-1, 3);
+    }
   }
   if(!husSatt){ // utan hus i kartan: standardhusets fot + dörr på gamla platsen
     for(let hy=HOUSE.ty+3; hy<HOUSE.ty+HOUSE.h; hy++) for(let hx=HOUSE.tx; hx<HOUSE.tx+HOUSE.w; hx++) set(hx,hy,3);
     set(DOOR_OUT.tx, DOOR_OUT.ty, 0); set(DOOR_OUT.tx+1, DOOR_OUT.ty, 0);
   }
-  if(!kista) set(CHEST.tx, CHEST.ty, 3);
-  if(!ugn) set(FORGE.tx, FORGE.ty, 3);
-  if(!stad) set(ANVILP.tx, ANVILP.ty, 3);
-  if(!brunn){ set(WELL.tx,WELL.ty,3); set(WELL.tx+1,WELL.ty,3); set(WELL.tx,WELL.ty+1,3); set(WELL.tx+1,WELL.ty+1,3); }
-  for(const cr of CRATES){ set(cr.tx, cr.ty, 3); set(cr.tx, cr.ty-1, 3); }
+  // ej utplacerade systemobjekt följer med huset i standardgårdens inbördes layout
+  const kl = (v,min,max)=>Math.max(min,Math.min(max,v));
+  const rel = (dx2,dy2)=>({ tx: kl(HOUSE.tx+dx2, 1, MW-3), ty: kl(HOUSE.ty+dy2, 1, WORLD_H-3) });
+  if(!kista){ const p2 = rel(13,5); CHEST.tx=p2.tx; CHEST.ty=p2.ty; }
+  set(CHEST.tx, CHEST.ty, 3);
+  if(!ugn){ const p2 = rel(9,2); FORGE.tx=p2.tx; FORGE.ty=p2.ty; }
+  set(FORGE.tx, FORGE.ty, 3);
+  if(!stad){ const p2 = rel(12,2); ANVILP.tx=p2.tx; ANVILP.ty=p2.ty; }
+  set(ANVILP.tx, ANVILP.ty, 3);
+  if(!brunn){ const p2 = rel(15,4); WELL.tx=p2.tx; WELL.ty=p2.ty; }
+  set(WELL.tx,WELL.ty,3); set(WELL.tx+1,WELL.ty,3); set(WELL.tx,WELL.ty+1,3); set(WELL.tx+1,WELL.ty+1,3);
+  CRATES.forEach((cr,i)=>{
+    if(!cr.flyttad){ const p2 = rel(8+i,5); cr.tx=p2.tx; cr.ty=p2.ty; }
+    set(cr.tx, cr.ty, 3); set(cr.tx, cr.ty-1, 3);
+  });
   // på egna kartor får man odla överallt
   FIELD.x0 = 1; FIELD.y0 = 1; FIELD.x1 = MW-2; FIELD.y1 = WORLD_H-2;
+  fenceAutoSet = new Set(fences.filter(f=>f[2]==='a').map(f=>f[0]+','+f[1]));
 }
 function buildStandard(set, rng){
   START.x = (HOUSE.tx+4)*TS+16; START.y = (HOUSE.ty+HOUSE.h)*TS+20;
@@ -1411,13 +1440,14 @@ function pathAutoTile(tx,ty){
   const has = (x,y)=> x>=0 && y>=0 && x<MW && y<MH && map[y*MW+x].kind===1;
   const m = (has(tx,ty-1)?1:0)|(has(tx+1,ty)?2:0)|(has(tx,ty+1)?4:0)|(has(tx-1,ty)?8:0);
   const st = SOIL_LUT[m];
-  return [st[0], 8+st[1]];
+  return [st[0], 12+st[1]]; // släta varianten (rad 12–15) — inga grästuvor i vägen
 }
 // dammen: vattentiles autotile:as direkt ur Water Ground-arket (kol +12 = opakt vatten,
 // radblock à 4 rader = 4 animationsframes med skvalpande vattenlinje + sandkant)
 function waterPiece(tx,ty){
   const w = (x,y)=> x>=0 && y>=0 && x<MW && y<MH && map[y*MW+x].kind===2;
   const m = (w(tx,ty-1)?1:0)|(w(tx+1,ty)?2:0)|(w(tx,ty+1)?4:0)|(w(tx-1,ty)?8:0);
+  if(m===15) return [5,1]; // mitten = helt rent vatten (interiörblocket)
   return SOIL_LUT[m];
 }
 function drawTile(img, sx, sy, dx, dy){
@@ -1538,6 +1568,7 @@ function draw(){
   for(const tr of trees) actors.push({y:(tr.ty+1)*TS-2, tree:tr});
   for(const n of nodes) if(!n.brutet) actors.push({y:(n.ty+1)*TS-1, node:n});
   actors.push({y:(WELL.ty+2)*TS-1, well:true});
+  for(const d of decorObjs) actors.push({y:(d.ty+d.fh)*TS-1, decor:d});
   actors.push({y:(FORGE.ty+1)*TS-1, forge:true});
   actors.push({y:(ANVILP.ty+1)*TS-1, anvil:true});
   for(const cr of CRATES){ actors.push({y:(cr.ty+1)*TS-1, crate:cr}); actors.push({y:cr.ty*TS-1, sign:cr}); }
@@ -1570,6 +1601,11 @@ function draw(){
       ctx.drawImage(IMG.chest, 8,0,16,16, CHEST.tx*TS-ox, CHEST.ty*TS-oy-6, 32, 32); // 2x som allt annat
       ctx.fillStyle='#e8c96a'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
       ctx.fillText('SÄLJ', CHEST.tx*TS-ox+16, CHEST.ty*TS-oy-36);
+    } else if(a.decor){
+      const d = a.decor, im = loadImg(d.p);
+      if(im.complete && im.naturalWidth)
+        ctx.drawImage(im, d.r[0], d.r[1], d.r[2], d.r[3],
+          d.tx*TS-ox + (d.fw*TS-d.r[2]*2)/2, (d.ty+d.fh)*TS-oy - d.r[3]*2, d.r[2]*2, d.r[3]*2);
     } else if(a.well){
       if(IMG.well) ctx.drawImage(IMG.well, 0, 0, 32, 48, WELL.tx*TS-ox, (WELL.ty+2)*TS-oy-96, 64, 96);
       ctx.fillStyle='#7ec8e8'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
@@ -1684,8 +1720,15 @@ function draw(){
       }
     } else if(a.fence){
       if(IMG.fence){
-        const horiz = a.fence[2]!==undefined ? a.fence[2] : (a.fence[1]===1 || a.fence[1]===WORLD_H-2);
-        const [sx2,sy2] = horiz ? [1,2] : [0,1];
+        let sx2, sy2;
+        if(a.fence[2]==='a'){ // kartbyggt staket: autotile mot grannarna
+          const [fx,fy] = a.fence;
+          const m = (fenceAutoSet.has(fx+','+(fy-1))?1:0)|(fenceAutoSet.has((fx+1)+','+fy)?2:0)|(fenceAutoSet.has(fx+','+(fy+1))?4:0)|(fenceAutoSet.has((fx-1)+','+fy)?8:0);
+          [sx2,sy2] = FENCE_LUT[m];
+        } else {
+          const horiz = a.fence[2]!==undefined ? a.fence[2] : (a.fence[1]===1 || a.fence[1]===WORLD_H-2);
+          [sx2,sy2] = horiz ? [1,2] : [0,1];
+        }
         ctx.drawImage(IMG.fence, sx2*16, sy2*16, 16, 16, a.fence[0]*TS-ox, a.fence[1]*TS-oy, TS, TS);
       }
     } else drawPlayer(a.p, ox, oy);
@@ -2020,6 +2063,7 @@ window.__SPAWNSLIME = (tx,ty)=>{ slimes.push({x:tx*TS+16, y:ty*TS+16, hp:2, dir:
 window.__TREES = ()=>trees.map(t=>({tx:t.tx, ty:t.ty, hp:t.hp, stump:t.stump}));
 window.__NODES = ()=>nodes.map(n=>({tx:n.tx, ty:n.ty, type:n.type, hp:n.hp, brutet:n.brutet}));
 window.__MANIFEST = ()=>Object.values(MANIFEST);
+window.__FENCES = ()=>({ n:fences.length, exempel:fences.slice(0,3), auto:[...fenceAutoSet].slice(0,10) });
 window.__FARM = (tx,ty,what)=>{ const t=map[ty*MW+tx]; if(!t) return 'no tile';
   if(what==='hoe'){ t.kind=4; t.soil={wet:false,wetT:0,crop:null}; }
   else if(what==='water'){ if(t.soil){ t.soil.wet=true; t.soil.wetT=90; } }
