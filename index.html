@@ -1,0 +1,1788 @@
+<title>Palssons Gård</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<script src="assets.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#1a2416;overflow:hidden;overscroll-behavior:none}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#1a2416}
+  #cv{image-rendering:pixelated;image-rendering:crisp-edges;background:#1a2416;outline:none}
+  .ol{position:fixed;inset:0;background:#1a2416;color:#f2ead6;font-family:monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;-webkit-user-select:none;user-select:none;z-index:10}
+  .bigbtn{font-family:monospace;font-size:19px;font-weight:bold;background:#26351f;color:#e8c96a;border:2px solid #e8c96a;padding:16px 24px;border-radius:10px;cursor:pointer;touch-action:manipulation}
+  #codeRow{display:none;flex-direction:column;align-items:center;gap:14px}
+  #codeInput{font-family:monospace;font-size:28px;text-transform:uppercase;letter-spacing:8px;width:190px;text-align:center;background:#26351f;color:#f2ead6;border:2px solid #4a5c3a;border-radius:8px;padding:10px}
+  #padUI{justify-content:flex-start;gap:0;touch-action:none}
+  #padTop{width:100%;box-sizing:border-box;padding:12px;padding-top:calc(12px + env(safe-area-inset-top));text-align:center;font-size:15px;line-height:1.5;background:#141c10;min-height:52px}
+  #padMain{flex:1;width:100%;position:relative;touch-action:none}
+  #stickZone{position:absolute;left:0;top:0;bottom:0;width:52%;touch-action:none}
+  #stickHint{position:absolute;left:26%;top:50%;transform:translate(-50%,-50%);color:#57684a;font-size:13px;text-align:center;pointer-events:none}
+  #stickBase{position:absolute;width:120px;height:120px;border-radius:50%;border:3px solid #4a5c3a;background:rgba(50,70,40,.5);display:none;pointer-events:none}
+  #stickKnob{position:absolute;width:56px;height:56px;border-radius:50%;background:#9aab88;display:none;pointer-events:none}
+  .abtn{position:absolute;border-radius:50%;font-family:monospace;font-weight:bold;color:#1a2416;display:flex;align-items:center;justify-content:center;border:none;touch-action:none;-webkit-tap-highlight-color:transparent}
+  #btnA{right:6%;bottom:16%;width:116px;height:116px;background:#e8c96a;font-size:16px}
+  #btnB{right:30%;bottom:50%;width:90px;height:90px;background:#8fb56a;font-size:13px}
+  .abtn.on{filter:brightness(1.35);transform:scale(.94)}
+  #padUI.local{background:transparent;pointer-events:none}
+  #padUI.local #padTop{display:none}
+  #padUI.local #padMain{pointer-events:none}
+  #padUI.local #stickZone,#padUI.local .abtn{pointer-events:auto}
+  #padUI.local .abtn{opacity:0.55}
+  #padUI.local #btnA{width:92px;height:92px;font-size:13px}
+  #padUI.local #btnB{width:72px;height:72px;font-size:11px}
+  #padUI.local #stickZone{width:45%}
+  #qrPanel{position:fixed;right:12px;bottom:12px;background:rgba(46,30,18,.94);border:3px solid #8a5a34;border-radius:6px;padding:10px;text-align:center;color:#f2ead6;font-family:monospace;z-index:5;display:none}
+</style>
+<div id="wrap"><canvas id="cv" width="960" height="540" tabindex="0"></canvas></div>
+<div id="chooseUI" class="ol" style="display:none">
+  <div style="font-size:24px;font-weight:bold;color:#e8c96a;text-align:center">PALSSONS<br>GÅRD</div>
+  <button class="bigbtn" id="chJoin">&#128241; Anslut som kontroll</button>
+  <div id="codeRow">
+    <div style="font-size:14px;color:#9aab88">Skriv koden från stora skärmen:</div>
+    <input id="codeInput" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false">
+    <button class="bigbtn" id="chGo">ANSLUT</button>
+  </div>
+  <button class="bigbtn" id="chHost" style="font-size:14px;opacity:.75">&#128421; Spela på den här skärmen</button>
+</div>
+<div id="padUI" class="ol" style="display:none">
+  <div id="padTop">Ansluter&hellip;</div>
+  <div id="padMain">
+    <div id="stickZone"><div id="stickHint">Dra här för<br>att gå</div><div id="stickBase"></div><div id="stickKnob"></div></div>
+    <button class="abtn" id="btnB">VERKTYG</button>
+    <button class="abtn" id="btnA">ANVÄND</button>
+  </div>
+</div>
+<div id="qrPanel"></div>
+<script>
+'use strict';
+// ============ PALSSONS GÅRD — Fas 1: En dag på gården ============
+// Grafik: "Farm RPG – Tiny Asset Pack" © EmanuelleDev (emanuelledev.itch.io)
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const VW = 960, VH = 540, TS = 32; // 16px-grafik ritad i 2x
+const LANIP = '%%LANIP%%';
+
+function fitCanvas(){
+  const s = Math.min(window.innerWidth/VW, window.innerHeight/VH);
+  cv.style.width = Math.floor(VW*s)+'px';
+  cv.style.height = Math.floor(VH*s)+'px';
+}
+window.addEventListener('resize', fitCanvas); fitCanvas();
+cv.focus();
+cv.addEventListener('pointerdown', ()=>cv.focus());
+
+const clamp = (v,a,b)=>v<a?a:(v>b?b:v);
+const lerp = (a,b,t)=>a+(b-a)*t;
+const dist = (ax,ay,bx,by)=>Math.hypot(bx-ax,by-ay);
+function mulberry32(seed){ let a=seed>>>0; return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ===================== ASSETS =====================
+const A = '/assets/';
+const CHARCOLS = ['#4fa4ff','#ff6a5e','#ffd24f','#c07bff','#5fd6a0'];
+const IMG = {}; // nyckel -> Image
+const MANIFEST = {};
+
+// ===================== MODULÄRA KARAKTÄRER =====================
+// Radformat 32px-celler: block 0 = ner, 1 = upp, 2 = höger, 3 = vänster.
+// Lager i ordning: hud → ögon → kläder → hår → (verktyg i metallfärg vid actions).
+const MODBASE = 'Character/Character/PNG/';
+const MODANIM = {
+  idle:  { dir:'1. Idle', frames:4, fps:5 },
+  walk:  { dir:'2. Walk', frames:6, fps:10 },
+  hoe:   { dir:'4. Pickaxe, Hoe and Catching insects', frames:6, fps:11, weapon:'Hoe' },
+  pickx: { dir:'4. Pickaxe, Hoe and Catching insects', frames:6, fps:11, weapon:'Pickaxe' },
+  axe:   { dir:'5. Axe and Sickle', frames:6, fps:11, weapon:'Axe' },
+  water: { dir:'7. Watering', frames:8, fps:11, weapon:'Watering' },
+  sword: { dir:'8. SwordAttack', frames:10, fps:22, weapon:'Sword' },
+  cidle: { dir:'13. Carrying - Idle', frames:4, fps:5 },
+  cwalk: { dir:'13.1 Carrying - Walk', frames:6, fps:10 },
+  pick:  { dir:'13.3 Carrying - Pick Up', frames:4, fps:7 }
+};
+const HAIRSTYLES = ['Standard','Josh','Lyria','Fawn','Sebastian','Silvermist','Iridessa'];
+const HAIRCOLS = ['Brown','Black','Blonde','Ginger'];
+const CLOTHCOLS = ['Blue','Red','Green','Purple','Pink'];
+const PRESETS = [
+  { skin:1, gender:'Male',   hair:'Standard',   hairCol:'Blonde', eyeCol:'Blue',  cloth:'Blue' },
+  { skin:2, gender:'Male',   hair:'Josh',       hairCol:'Black',  eyeCol:'Brown', cloth:'Green' },
+  { skin:1, gender:'Female', hair:'Lyria',      hairCol:'Brown',  eyeCol:'Green', cloth:'Red' },
+  { skin:3, gender:'Female', hair:'Silvermist', hairCol:'Black',  eyeCol:'Brown', cloth:'Pink' },
+  { skin:2, gender:'Female', hair:'Iridessa',   hairCol:'Ginger', eyeCol:'Blue',  cloth:'Purple' }
+];
+const MODIMG = {};
+function loadImg(p){
+  if(MODIMG[p]) return MODIMG[p];
+  const im = new Image();
+  im.src = (window.__ASSETDATA && window.__ASSETDATA[p]) || ('/assets/' + p);
+  MODIMG[p] = im;
+  return im;
+}
+function layerPaths(def, ak, tier){
+  const an = MODANIM[ak], b = MODBASE + an.dir + '/';
+  const l = [
+    b+'Skins/'+def.skin+'.png',
+    b+'Eyes/'+def.gender+'/'+def.eyeCol+'.png',
+    b+'Clothers/Farm/'+def.cloth+'.png',
+    b+"Hair's/"+def.hair+'/'+def.hairCol+'.png'
+  ];
+  if(an.weapon) l.push(b+'Weapons/'+an.weapon+'/'+((tier||0)+1)+'.png');
+  return l;
+}
+function preloadDef(def){
+  for(const ak of Object.keys(MODANIM))
+    for(const t of (MODANIM[ak].weapon ? [0,1] : [0]))
+      layerPaths(def, ak, t).forEach(loadImg);
+}
+function drawModChar(g, def, ak, dir, fi, dx, dy, sc, tier){
+  const an = MODANIM[ak] || MODANIM.idle;
+  const block = dir===0?0 : dir===1?1 : dir===3?2 : 3;
+  const sx = (block*an.frames + (fi%an.frames))*32;
+  for(const p of layerPaths(def, ak, tier)){
+    const im = loadImg(p);
+    if(im.complete && im.naturalWidth) g.drawImage(im, sx, 0, 32, 32, dx, dy, 32*sc, 32*sc);
+  }
+}
+MANIFEST.gwater = 'Tileset/Tileset Grass Water Spring.png';
+// fas 2: gruva, bänkar, fiende, materialikoner + verktygsikoner i två nivåer
+MANIFEST.minerals = 'Objects/Exterior/Mine and Dungeon/stone with minerals.png';
+MANIFEST.furnace = 'Objects/Work Benches/Furnace.png';
+MANIFEST.anvil = 'Objects/Work Benches/Anvil.png';
+MANIFEST.iconsWood = 'Icons/RPG icons/Extras/Wood.png';
+MANIFEST.iconsStones = 'Icons/RPG icons/Extras/Stones.png';
+MANIFEST.iconsBars = 'Icons/RPG icons/Extras/Bars and ores.png';
+MANIFEST.slimeIdle = 'Enemy/Slimes/Blue/Slime/Idle.png';
+MANIFEST.slimeWalk = 'Enemy/Slimes/Blue/Slime/Walk.png';
+MANIFEST.slimeDead = 'Enemy/Slimes/Blue/Slime/Dead.png';
+MANIFEST.slimeDmg = 'Enemy/Slimes/Blue/Slime/Damage.png';
+MANIFEST.box = 'Objects/Exterior/Box.png';
+MANIFEST.houseTiles = 'Tileset/Tileset House.png';
+MANIFEST.beds = 'Objects/Interior/Beds.png';
+const TIERDIR = ['1. Wood', '2. Cooper']; // OBS: packmakaren stavar koppar "Cooper" — och kannan olika per mapp
+const TIERTOOLS = [
+  { hoe:'Hoe.png', can:'Watering can.png', axe:'Axe.png', pick:'Pickaxe.png', sword:'Sword.png' },
+  { hoe:'Hoe.png', can:'Watering Can.png', axe:'Axe.png', pick:'Pickaxe.png', sword:'Sword.png' }
+];
+for(let t2=0; t2<TIERDIR.length; t2++)
+  for(const [tid, fil] of Object.entries(TIERTOOLS[t2]))
+    MANIFEST['i_'+tid+'_'+t2] = 'Icons/RPG icons/Weapons and Armor/'+TIERDIR[t2]+'/'+fil;
+MANIFEST.grass = 'Tileset/Tileset Grass Spring.png';
+MANIFEST.soil = 'Tileset/Tilled Soil and wet soil.png';
+MANIFEST.water = 'Tileset/Water tile.png';
+MANIFEST.carrot = 'Crops/Spring/Carrot.png';
+MANIFEST.potato = 'Crops/Spring/Potato.png';
+MANIFEST.straw = 'Crops/Spring/Strawberry.png';
+MANIFEST.house = 'Objects/Exterior/Houses/3.png';
+MANIFEST.chest = 'Objects/Exterior/chest.png';
+MANIFEST.fence = 'Objects/Exterior/Fence and Bridge/Fence Wood.png';
+MANIFEST.tree = 'Objects/Tree/Common/Shadow/Maple Tree.png';
+MANIFEST.clock = 'UI/Clock/Clock.png';
+MANIFEST.money = 'UI/Money.png';
+MANIFEST.btn = 'UI/button.png';
+MANIFEST.hud = 'UI/HUD.png';
+MANIFEST.bars = 'UI/Bars.png';
+MANIFEST.slots = 'UI/Inventory/Slots.png';
+MANIFEST.weather = 'UI/weather icons.png';
+MANIFEST.hand = 'UI/Clock/clock hand.png';
+let assetsReady = false;
+function loadAssets(){
+  const jobs = Object.entries(MANIFEST).map(([k,p])=>new Promise(res=>{
+    const im = new Image();
+    im.onload = ()=>{ IMG[k]=im; res(); };
+    im.onerror = ()=>{ console.warn('kunde inte ladda', p); IMG[k]=null; res(); };
+    im.src = (window.__ASSETDATA && window.__ASSETDATA[p]) || (A + p); // GH Pages-bygget bakar in sprites som data-URI:er
+  }));
+  return Promise.all(jobs).then(()=>{
+    plainGrass = buildCleanTile(IMG.grass, 6, 2);
+    const gp = plainGrass.getContext('2d').getImageData(8,8,1,1).data;
+    grassBase = 'rgb('+gp[0]+','+gp[1]+','+gp[2]+')'; // basfärg under tiles med transparenshål
+    soilProc = buildSoilSheet();
+    gwaterProc = buildShoreSheet();
+    for(const id of Object.keys(CROPS)) CROP_ANCHOR[id] = measureCropFrames(IMG[id]);
+    savedInfo = loadSave();
+    assetsReady = true;
+  });
+}
+// strandarkets kantbitar har rot/vass-dekor inbakad — tvätta bort bruna toner, behåll gräs + blå vattenlinje
+let gwaterProc = null;
+function buildShoreSheet(){
+  const img = IMG.gwater; if(!img) return null;
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  const gp = plainGrass ? plainGrass.getContext('2d').getImageData(8,8,1,1).data : [113,184,77,255];
+  const id = g.getImageData(0, 128, 192, 64); // radblock 8–11, kol 0–11
+  const d = id.data;
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3]>40 && d[i] > d[i+1]){ d[i]=gp[0]; d[i+1]=gp[1]; d[i+2]=gp[2]; d[i+3]=255; }
+  }
+  g.putImageData(id, 0, 128);
+  return c;
+}
+// jordarkets strip-/singelbitar har dekorprickar som ser ut som felplacerade frön —
+// tvätta interiören men skydda konturen (pixlar nära transparens/kant lämnas orörda)
+let soilProc = null;
+function buildSoilSheet(){
+  const img = IMG.soil; if(!img) return null;
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  for(const [tx,ty] of [[0,0],[0,1],[0,2],[0,3],[1,3],[2,3],[3,3]]) cleanSoilPiece(g, tx*16, ty*16);
+  return c;
+}
+function cleanSoilPiece(g, px, py){
+  const id = g.getImageData(px, py, 16, 16), d = id.data;
+  const tally = {};
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3]<250) continue;
+    const k = d[i]+','+d[i+1]+','+d[i+2];
+    tally[k] = (tally[k]||0)+1;
+  }
+  const arr = Object.entries(tally)
+    .map(([k,n])=>{ const [r,gg,b]=k.split(',').map(Number); return {r,gg,b,n}; })
+    .sort((a,b)=>b.n-a.n);
+  if(!arr.length) return;
+  const bas = arr[0];
+  const alpha = (x,y)=>d[(y*16+x)*4+3];
+  for(let y=0;y<16;y++) for(let x=0;x<16;x++){
+    const i = (y*16+x)*4;
+    if(d[i+3]<250) continue;
+    let kant = false;
+    for(let dy=-2;dy<=2&&!kant;dy++) for(let dx=-2;dx<=2;dx++){
+      const nx=x+dx, ny=y+dy;
+      if(nx<0||ny<0||nx>15||ny>15 || alpha(nx,ny)<250){ kant=true; break; }
+    }
+    if(kant) continue;
+    const diff = Math.abs(d[i]-bas.r)+Math.abs(d[i+1]-bas.gg)+Math.abs(d[i+2]-bas.b);
+    if(diff>24){ d[i]=bas.r; d[i+1]=bas.gg; d[i+2]=bas.b; }
+  }
+  g.putImageData(id, px, py);
+}
+// mät varje växtstegs innehåll så grödan kan centreras på sin ruta (fröna ligger annars uppe i hörnet)
+const CROP_ANCHOR = {};
+function measureCropFrames(img){
+  const out = [];
+  if(!img) return out;
+  const c = document.createElement('canvas'); c.width = img.width; c.height = 16;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, img.width, 16).data;
+  const nf = Math.floor(img.width/16);
+  for(let f=0; f<nf; f++){
+    let minX=16, maxX=-1, minY=16, maxY=-1;
+    for(let y=0;y<16;y++) for(let x=0;x<16;x++){
+      if(d[((y*img.width)+f*16+x)*4+3] > 40){
+        if(x<minX) minX=x; if(x>maxX) maxX=x; if(y<minY) minY=y; if(y>maxY) maxY=y;
+      }
+    }
+    if(maxX<0){ out.push({ax:0, ay:0}); continue; }
+    const h = maxY-minY+1;
+    // låga frames (frön/groddar) centreras mitt i plätten, höga står med foten vid rad 14
+    const ay = h<=10 ? 2*Math.round(8-(minY+maxY+1)/2) : (14-(maxY+1))*2;
+    out.push({ ax: 2*Math.round(8-(minX+maxX+1)/2), ay });
+  }
+  return out;
+}
+// arkets tiles har dekorprickar + transparenta hål i hörnen — despeckla fram rena rutor
+let plainGrass = null, grassBase = '#71b84d';
+function buildCleanTile(img, tx, ty){
+  const c = document.createElement('canvas'); c.width = 16; c.height = 16;
+  if(!img) return c;
+  const g = c.getContext('2d');
+  g.drawImage(img, tx*16, ty*16, 16, 16, 0, 0, 16, 16);
+  const id = g.getImageData(0, 0, 16, 16), d = id.data;
+  const tally = {};
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3]<250) continue;
+    const k = d[i]+','+d[i+1]+','+d[i+2];
+    tally[k] = (tally[k]||0)+1;
+  }
+  const alla = Object.entries(tally)
+    .map(([k,n])=>{ const [r,gg,b]=k.split(',').map(Number); return {r,gg,b,n}; })
+    .sort((a,b)=>b.n-a.n);
+  if(!alla.length) return c;
+  const bas = alla[0];
+  for(let i=0;i<d.length;i+=4){
+    const diff = Math.abs(d[i]-bas.r)+Math.abs(d[i+1]-bas.gg)+Math.abs(d[i+2]-bas.b);
+    if(diff > 24 || d[i+3] < 250){
+      d[i]=bas.r; d[i+1]=bas.gg; d[i+2]=bas.b; d[i+3]=255;
+    }
+  }
+  g.putImageData(id, 0, 0);
+  return c;
+}
+
+// ===================== PANELER (button.png-teman, 48x48-källor, 16px-hörn) =====================
+// button.png = 11 färgteman à 48px-block: panel {48,16+48*i}, bred knapp {0,...}, kvadrat {96,...}.
+// Beige (i=2) och rosa (i=7) har VIT ytterkant inbakad i arket — därför peach (i=10) + brun (i=0).
+const THEME = { beige:{x:48,y:496}, beigeBtn:{x:0,y:496}, brown:{x:48,y:16}, orange:{x:48,y:400}, square:{x:96,y:496}, squareSel:{x:96,y:400} };
+function drawPanel(theme, x, y, w, h){
+  const img = IMG.btn; if(!img) return;
+  const sx = theme.x, sy = theme.y, c = 16;
+  const S=(ix,iy,iw,ih,dx,dy,dw,dh)=>ctx.drawImage(img,sx+ix,sy+iy,iw,ih,Math.round(x+dx),Math.round(y+dy),dw,dh);
+  S(0,0,c,c, 0,0,c,c); S(32,0,c,c, w-c,0,c,c); S(0,32,c,c, 0,h-c,c,c); S(32,32,c,c, w-c,h-c,c,c);
+  S(16,0,16,c, c,0,w-2*c,c); S(16,32,16,c, c,h-c,w-2*c,c);
+  S(0,16,c,16, 0,c,c,h-2*c); S(32,16,c,16, w-c,c,c,h-2*c);
+  S(16,16,16,16, c,c,w-2*c,h-2*c);
+}
+function drawWideBtn(x, y, w, h){
+  const img = IMG.btn; if(!img) return;
+  const sx = THEME.beigeBtn.x, sy = THEME.beigeBtn.y;
+  ctx.drawImage(img, sx,sy,16,16, Math.round(x),Math.round(y),16,h);
+  ctx.drawImage(img, sx+16,sy,16,16, Math.round(x+16),Math.round(y),w-32,h);
+  ctx.drawImage(img, sx+32,sy,16,16, Math.round(x+w-16),Math.round(y),16,h);
+}
+
+// ===================== GRÖDOR =====================
+// 128x16-ark: frame 0..6 = växtsteg, frame 7 = skördad vara (ikon)
+const CROPS = {
+  carrot: { namn:'Morot',    tid:180, pris:18, fro:'Morotsfrö' },
+  potato: { namn:'Potatis',  tid:240, pris:28, fro:'Potatisfrö' },
+  straw:  { namn:'Jordgubbe',tid:360, pris:45, fro:'Jordgubbsfrö', regrow:4 }
+};
+const STAGES = 5; // sista växtsteget = moget (frame 6 i arken är TOM, frame 7 = varuikon)
+
+// ===================== KARTAN =====================
+const MW = 44, WORLD_H = 30, MH = 48; // raderna under världen = husets interiör (kameran når aldrig båda samtidigt)
+// husets rum: golv, väggrader ovanför, dörr-teleporter och sängen
+const ROOM = { x0:3, y0:42, x1:12, y1:46 };
+const DOOR_OUT = { tx:7, ty:8 };    // dörröppningen i husfasaden
+const DOOR_SPAWN = { tx:7, ty:9 };
+const ROOM_ENTRY = { tx:7, ty:45 };
+const ROOM_EXIT = { tx:7, ty:46 };  // kliv på mattan → ut igen
+const BED = { tx:10, ty:42 };       // dubbelsäng 2x2
+// kind: 0 gräs, 1 jordstig, 2 vatten, 3 blockerad(osynlig), 4 odlingsjord
+const map = [];
+const solidAt = (tx,ty)=>{
+  if(tx<1||ty<1||tx>=MW-1||ty>=MH-1) return true;
+  const t = map[ty*MW+tx];
+  return t.kind===2 || t.kind===3;
+};
+let trees = [], fences = [], nodes = [], slimes = [];
+const HOUSE = { tx:3, ty:2, w:8, h:7 };       // sprite 128x112 → 8x7 tiles
+const CHEST = { tx:16, ty:7 };                 // kistan: slem & övrigt monsterloot
+const FORGE = { tx:12, ty:4 };                 // ugnen (smält 2 malm + 1 stock → tacka)
+const ANVILP = { tx:15, ty:4 };                // städet (smid kopparverktyg, 2 tackor/st)
+// säljlådor med skylt — rätt gröda i rätt låda, säljs när dagen är slut
+const CRATES = [
+  { crop:'carrot', tx:11, ty:7, src:[99,31,11,17] },
+  { crop:'potato', tx:12, ty:7, src:[83,97,11,15] },
+  { crop:'straw',  tx:13, ty:7, src:[51,3,11,13] }
+];
+const CRATE_EMPTY = [19,3,11,13];
+let crateCount = { carrot:0, potato:0, straw:0 };
+const forge = { active:false, t:0, owner:-1 };
+// ytgruvans noder öster om fältet: sten (gruvhacka → sten) + kopparådror (→ malm)
+const NODESPOTS = [
+  {tx:34, ty:8,  type:'rock'}, {tx:37, ty:9,  type:'copper'}, {tx:40, ty:11, type:'rock'},
+  {tx:35, ty:12, type:'copper'}, {tx:38, ty:14, type:'rock'}, {tx:41, ty:15, type:'rock'},
+  {tx:34, ty:17, type:'copper'}, {tx:37, ty:18, type:'rock'}, {tx:40, ty:19, type:'copper'},
+  {tx:35, ty:20, type:'rock'}
+];
+const FIELD = { x0:12, y0:11, x1:32, y1:21 };
+const POND = { x0:35, y0:22, x1:39, y1:25 };
+function buildMap(){
+  const rng = mulberry32(77);
+  map.length = 0; trees = []; fences = []; nodes = []; slimes = [];
+  for(let y=0;y<MH;y++) for(let x=0;x<MW;x++){
+    map.push({ kind:0, g:(rng()<0.12?1:0)+(rng()<0.06?2:0), soil:null });
+  }
+  const set = (x,y,k)=>{ map[y*MW+x].kind = k; };
+  // damm
+  for(let y=POND.y0;y<=POND.y1;y++) for(let x=POND.x0;x<=POND.x1;x++) set(x,y,2);
+  // husets fotavtryck (nedre 4 rader av spriten är solid kropp)
+  for(let y=HOUSE.ty+3;y<HOUSE.ty+HOUSE.h;y++) for(let x=HOUSE.tx;x<HOUSE.tx+HOUSE.w;x++) set(x,y,3);
+  // (dörren hålls stängd tills interiören byggs i fas 4 — hela husfoten är solid)
+  // säljkistan + smedjan + lådorna
+  set(CHEST.tx, CHEST.ty, 3);
+  set(FORGE.tx, FORGE.ty, 3);
+  set(ANVILP.tx, ANVILP.ty, 3);
+  crateCount = { carrot:0, potato:0, straw:0 };
+  for(const cr of CRATES){ set(cr.tx, cr.ty, 3); set(cr.tx, cr.ty-1, 3); } // skyltrutan också solid
+  // gruvnoder
+  nodes = NODESPOTS.map(s=>({tx:s.tx, ty:s.ty, type:s.type, hp:s.type==='copper'?3:2, brutet:false}));
+  for(const n of nodes) set(n.tx, n.ty, 3);
+  // jordstig hus → fält
+  for(let x=7;x<=14;x++) set(x, 9, 1);
+  for(let y=9;y<=12;y++) set(14, y, 1);
+  // staket runt gården (innanför kanten) med öppning söderut
+  for(let x=1;x<MW-1;x++){ if(x<20||x>23){ fences.push([x,1]); fences.push([x,WORLD_H-2]); set(x,1,3); set(x,WORLD_H-2,3); } }
+  for(let y=2;y<WORLD_H-2;y++){ fences.push([1,y]); fences.push([MW-2,y]); set(1,y,3); set(MW-2,y,3); }
+  // interiören: allt under världen är blockerat utom rummets golv
+  for(let y=WORLD_H;y<MH;y++) for(let x=0;x<MW;x++) set(x,y,3);
+  for(let y=ROOM.y0;y<=ROOM.y1;y++) for(let x=ROOM.x0;x<=ROOM.x1;x++) set(x,y,0);
+  set(BED.tx,BED.ty,3); set(BED.tx+1,BED.ty,3); set(BED.tx,BED.ty+1,3); set(BED.tx+1,BED.ty+1,3);
+  set(DOOR_OUT.tx, DOOR_OUT.ty, 0); set(DOOR_OUT.tx+1, DOOR_OUT.ty, 0); // dörröppning 2 tiles bred
+  // träd i hörnen och längs kanterna
+  const spots = [[24,3],[28,2],[33,4],[38,3],[40,8],[3,12],[2,18],[4,24],[9,25],[40,17],[36,12],[25,25],[31,26]];
+  for(const [x,y] of spots){ if(map[y*MW+x].kind===0){ trees.push({tx:x, ty:y, hp:3, stump:false, regrowDag:0, shakeT:0}); set(x,y,3); } }
+}
+// ny dag: energi, väder, träd växer tillbaka, gruvnoder respawnar, slimes vandrar in
+function dayRefresh(){
+  const rng = mulberry32(dag*991);
+  vader = rollWeather(rng);
+  players.forEach(p=>{ p.energy = 100; });
+  for(const t of trees) if(t.stump && dag >= t.regrowDag){ t.stump=false; t.hp=3; map[t.ty*MW+t.tx].kind=3; }
+  for(const n of nodes){ n.brutet=false; n.hp = n.type==='copper'?3:2; map[n.ty*MW+n.tx].kind=3; }
+  spawnSlimes();
+}
+function spawnSlimes(){
+  slimes = [];
+  if(dag < 2) return; // dag 1 = lugn start
+  const rng = mulberry32(dag*577);
+  const n = Math.min(2 + Math.floor(dag/3), 5);
+  for(let i=0;i<n;i++){
+    const kant = [[3+((rng()*18)|0), WORLD_H-4], [MW-4, 4+((rng()*16)|0)], [20+((rng()*16)|0), WORLD_H-4]][i%3];
+    slimes.push({ x:kant[0]*TS+16, y:kant[1]*TS+16, hp:2, dir:0, animT:rng()*2, hurtT:0, deadT:0,
+                  vx:0, vy:0, mal:null, malT:0 });
+  }
+}
+
+// ===================== TID & VÄDER =====================
+const DAG_S = 720, NATT_S = 180; // natt = dag/4
+let klockT = 0, dag = 1, sasong = 'Vår', vader = 'sol';
+let natt = false;
+const rollWeather = rng => (rng()<0.25 ? 'regn' : 'sol');
+let coins = 0;
+
+// ===================== SPARA =====================
+function save(){
+  try{
+    const data = {
+      v: 3, dag, coins, vader,
+      soil: map.map(t=>t.soil ? {w:t.soil.wet?1:0, c:t.soil.crop?{i:t.soil.crop.id, s:t.soil.crop.stage, p:Math.round(t.soil.crop.prog)}:null} : 0),
+      kinds: map.map(t=>t.kind),
+      trees: trees.map(t=>({s:t.stump?1:0, r:t.regrowDag, hp:t.hp})),
+      nodes: nodes.map(n=>n.brutet?1:0),
+      crates: crateCount,
+      pl: players.map(p=>({nm:p.name, def:p.def, seeds:p.seeds, carry:p.carry, en:Math.round(p.energy), mats:p.mats, tier:p.tier, tool:p.tool}))
+    };
+    localStorage.setItem('gard-save', JSON.stringify(data));
+  }catch(e){}
+}
+function loadSave(){
+  try{ return JSON.parse(localStorage.getItem('gard-save')); }catch(e){ return null; }
+}
+let savedInfo = null; // cache för startskärmen (sätts vid boot, nollas av N = börja om)
+
+// ===================== INPUT-STACK (beprövad från förra spelet) =====================
+const keys = {};
+const PREVENT = new Set(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','ShiftRight','KeyW','KeyA','KeyS','KeyD','KeyE','Tab','KeyI','Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8']);
+const kbLatch = {}; // snabba tryck får inte falla mellan poll-frames (samma latch-idé som touch/nät)
+window.addEventListener('keydown', e=>{
+  if(e.target && e.target.tagName==='INPUT') return;
+  if(PREVENT.has(e.code)) e.preventDefault();
+  keys[e.code] = true;
+  if(!e.repeat) kbLatch[e.code] = true;
+  if((e.code==='KeyP'||e.code==='Escape'||e.code==='KeyI'||e.code==='Tab') && state==='play') paused = !paused;
+  if(e.code==='KeyT' && state==='play' && !paused) trySleep();
+  if(e.code==='KeyN' && state==='select'){ localStorage.removeItem('gard-save'); savedInfo = null; }
+});
+window.addEventListener('keyup', e=>{ keys[e.code]=false; });
+window.addEventListener('blur', ()=>{ for(const k in keys) keys[k]=false; });
+
+const KEYSETS = [
+  {up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD',attack:'Space',special:'KeyE'},
+  {up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',attack:'Enter',special:'ShiftRight'}
+];
+function pads(){ try{ return navigator.getGamepads?navigator.getGamepads():[]; }catch(e){ return []; } }
+const ctrlPrev = {}, CTRL = {};
+let LOCALPAD = false;
+const TCTRL = {x:0,y:0,a:false,s:false};
+function rawCtrl(id){
+  if(id[0]==='k'){
+    const ks = KEYSETS[+id[1]];
+    const at = !!keys[ks.attack] || !!kbLatch[ks.attack];
+    const sp = !!keys[ks.special] || !!kbLatch[ks.special];
+    kbLatch[ks.attack] = false; kbLatch[ks.special] = false;
+    return { x:(keys[ks.right]?1:0)-(keys[ks.left]?1:0), y:(keys[ks.down]?1:0)-(keys[ks.up]?1:0), attack:at, special:sp };
+  }
+  if(id==='t0'){
+    let x = TCTRL.x; if(x===0 && TCTRL.xL) x = TCTRL.xL;
+    const at = TCTRL.a||!!TCTRL.aL, sp = TCTRL.s||!!TCTRL.sL;
+    TCTRL.aL=false; TCTRL.sL=false; TCTRL.xL=0;
+    return { x, y:TCTRL.y, attack:at, special:sp };
+  }
+  if(id[0]==='n'){
+    const c = NET.ctrls[id];
+    if(!c || !c.alive) return {x:0,y:0,attack:false,special:false};
+    const st = c.state;
+    let x = st.x; if(x===0 && st.xL) x = st.xL;
+    const at = st.attack||!!st.aL, sp = st.special||!!st.sL;
+    st.aL=false; st.sL=false; st.xL=0;
+    return { x, y:st.y, attack:at, special:sp };
+  }
+  const gp = pads()[+id.slice(1)];
+  if(!gp) return {x:0,y:0,attack:false,special:false};
+  let x = gp.axes[0]||0, y = gp.axes[1]||0;
+  if(Math.abs(x)<0.28)x=0; if(Math.abs(y)<0.28)y=0;
+  const b=i=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
+  if(b(14))x=-1; if(b(15))x=1; if(b(12))y=-1; if(b(13))y=1;
+  return { x, y, attack:b(0)||b(7), special:b(1)||b(2)||b(6) };
+}
+function pollInputs(){
+  const ids = ['k0','k1', ...Object.keys(NET.ctrls).filter(i=>NET.ctrls[i].alive)];
+  if(LOCALPAD) ids.push('t0');
+  const gps = pads();
+  for(let i=0;i<gps.length;i++) if(gps[i]) ids.push('p'+i);
+  for(const id of ids){
+    const cur = rawCtrl(id);
+    const prev = ctrlPrev[id]||{x:0,y:0,attack:false,special:false};
+    CTRL[id] = { ...cur, aJP:cur.attack&&!prev.attack, sJP:cur.special&&!prev.special, lJP:cur.x<0&&prev.x>=0, rJP:cur.x>0&&prev.x<=0, uJP:cur.y<0&&prev.y>=0, dJP:cur.y>0&&prev.y<=0 };
+    ctrlPrev[id] = cur;
+  }
+}
+const C = id=>CTRL[id]||{x:0,y:0,attack:false,special:false,aJP:false,sJP:false,lJP:false,rJP:false,uJP:false,dJP:false};
+
+// ===================== NÄT (PeerJS + TURN, beprövat) =====================
+const URLQ = new URLSearchParams(location.search);
+const HASPEER = typeof window.Peer !== 'undefined';
+const IS_TOUCH = 'ontouchstart' in window;
+let MODE = 'host';
+if(URLQ.get('room')) MODE = 'ctrl';
+else if(HASPEER && IS_TOUCH && Math.min(innerWidth,innerHeight) < 620) MODE = 'choose';
+const ICE_OPTS = { config:{ iceServers:[
+  { urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] },
+  { urls:'turn:openrelay.metered.ca:80', username:'openrelayproject', credential:'openrelayproject' },
+  { urls:'turn:openrelay.metered.ca:443', username:'openrelayproject', credential:'openrelayproject' },
+  { urls:'turn:openrelay.metered.ca:443?transport=tcp', username:'openrelayproject', credential:'openrelayproject' }
+]}};
+const NET = { mode:'none', peer:null, ctrls:{}, code:'', open:false, nextIdx:0, lastPush:0 };
+function makeCode(){ const s='abcdefghjkmnpqrstuvwxyz23456789'; let r=''; for(let i=0;i<4;i++) r+=s[(Math.random()*s.length)|0]; return r; }
+function joinLink(){
+  const lokal = location.hostname==='localhost'||location.hostname==='127.0.0.1';
+  const host = lokal && LANIP!=='%%'+'LANIP%%' ? LANIP+':'+location.port : location.host;
+  const proto = (!lokal && location.protocol==='https:') ? 'https://' : 'http://';
+  return proto+host+location.pathname+'?room='+NET.code;
+}
+function startHost(){
+  if(!HASPEER || NET.mode==='host') return;
+  NET.mode = 'host';
+  let tries = 0;
+  const attempt = ()=>{
+    NET.code = makeCode();
+    const peer = new Peer('gard-'+NET.code, ICE_OPTS);
+    NET.peer = peer;
+    peer.on('open', ()=>{ NET.open=true; updateQR(); });
+    peer.on('disconnected', ()=>{ try{ peer.reconnect(); }catch(e){} });
+    peer.on('error', err=>{ if(err&&err.type==='unavailable-id'&&tries++<5){ try{peer.destroy();}catch(e){} attempt(); } });
+    peer.on('connection', conn=>{
+      conn.on('open', ()=>{
+        const all = [...joiners.map(j=>j.ctrlId), ...players.map(p=>p.ctrlId)];
+        let id = all.find(cid=>cid&&cid[0]==='n'&&(!NET.ctrls[cid]||!NET.ctrls[cid].alive));
+        if(!id) id = 'n'+(NET.nextIdx++);
+        NET.ctrls[id] = { conn, alive:true, state:{x:0,y:0,attack:false,special:false} };
+        conn.on('data', d=>{
+          if(d&&d.t==='i'&&NET.ctrls[id]){
+            const s = NET.ctrls[id].state;
+            const nx=+d.x||0, ny=+d.y||0, na=!!d.a, ns=!!d.s;
+            if(na&&!s.attack) s.aL=true;
+            if(ns&&!s.special) s.sL=true;
+            if(nx!==0&&s.x===0) s.xL=nx;
+            s.x=nx; s.y=ny; s.attack=na; s.special=ns;
+          } else if(d&&d.t==='nm'){
+            const j = joiners.find(j2=>j2.ctrlId===id && j2.step==='name');
+            if(j){ j.name = String(d.v||'').trim().slice(0,12); finishName(j); }
+          }
+        });
+        const drop=()=>{ if(NET.ctrls[id]&&NET.ctrls[id].conn===conn){ NET.ctrls[id].alive=false; NET.ctrls[id].state={x:0,y:0,attack:false,special:false}; } };
+        conn.on('close', drop); conn.on('error', drop);
+      });
+    });
+  };
+  attempt();
+}
+function netSend(id,msg){ const c=NET.ctrls[id]; if(c&&c.alive){ try{ c.conn.send(msg); }catch(e){} } }
+function pushStatus(){
+  if(NET.mode!=='host' || time-NET.lastPush<0.4) return;
+  NET.lastPush = time;
+  for(const id of Object.keys(NET.ctrls)){
+    if(!NET.ctrls[id].alive) continue;
+    let msg = { t:'you', st:'lobby' };
+    const ji = joiners.findIndex(j=>j.ctrlId===id);
+    if(ji>=0){
+      const j = joiners[ji], n = (state==='select'?ji:players.length+ji)+1;
+      msg = { t:'you', st: j.step==='name'?'name':'select', n, cls:(j.name||'Bonde #'+n), color:CHARCOLS[j.ci], ready:j.ready, steg:j.step };
+    }
+    else if(state!=='select'){
+      const p = players.find(q=>q.ctrlId===id);
+      if(p) msg = { t:'you', st:'play', cls:p.name, color:p.col, en:Math.round(p.energy), tool:TOOLDEF[p.tool].namn };
+    }
+    netSend(id, msg);
+  }
+}
+const qrPanel = document.getElementById('qrPanel');
+function updateQR(){
+  if(!NET.open) return;
+  qrPanel.innerHTML = '<img width="140" height="140" alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data='+encodeURIComponent(joinLink())+'">'
+    + '<div style="margin-top:6px;font-size:12px">Skanna med mobilen</div>'
+    + '<div style="font-size:20px;font-weight:bold;color:#e8c96a;letter-spacing:5px">'+NET.code.toUpperCase()+'</div>';
+}
+
+// ===================== MOBILKONTROLL =====================
+function bindPadControls(st, onChange){
+  const zone=document.getElementById('stickZone'), base=document.getElementById('stickBase'), knob=document.getElementById('stickKnob'), hint=document.getElementById('stickHint');
+  let sid=null, ox=0, oy=0;
+  const place=(el,x,y,sz)=>{ el.style.left=(x-sz/2)+'px'; el.style.top=(y-sz/2)+'px'; };
+  zone.addEventListener('pointerdown', e=>{
+    if(sid!==null) return;
+    sid=e.pointerId; try{ zone.setPointerCapture(sid); }catch(err){}
+    const r=zone.getBoundingClientRect(); ox=e.clientX-r.left; oy=e.clientY-r.top;
+    hint.style.display='none'; base.style.display='block'; knob.style.display='block';
+    place(base,ox,oy,120); place(knob,ox,oy,56);
+  });
+  zone.addEventListener('pointermove', e=>{
+    if(e.pointerId!==sid) return;
+    const r=zone.getBoundingClientRect();
+    let dx=e.clientX-r.left-ox, dy=e.clientY-r.top-oy;
+    const d=Math.hypot(dx,dy), max=56;
+    if(d>max){ dx=dx/d*max; dy=dy/d*max; }
+    place(knob, ox+dx, oy+dy, 56);
+    const nx=dx/max, ny=dy/max;
+    const newX = Math.abs(nx)<0.25?0:nx;
+    if(newX!==0 && st.x===0) st.xL=newX;
+    st.x=newX; st.y=Math.abs(ny)<0.25?0:ny;
+    onChange();
+  });
+  const end=e=>{ if(e.pointerId!==sid) return; sid=null; st.x=0; st.y=0; base.style.display='none'; knob.style.display='none'; onChange(); };
+  zone.addEventListener('pointerup', end); zone.addEventListener('pointercancel', end);
+  const bindBtn=(el,key)=>{
+    el.addEventListener('pointerdown', e=>{ e.preventDefault(); st[key]=true; st[key+'L']=true; el.classList.add('on'); onChange(); });
+    const off=()=>{ st[key]=false; el.classList.remove('on'); onChange(); };
+    el.addEventListener('pointerup', off); el.addEventListener('pointercancel', off); el.addEventListener('pointerleave', off);
+  };
+  bindBtn(document.getElementById('btnA'),'a');
+  bindBtn(document.getElementById('btnB'),'s');
+  document.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
+  document.addEventListener('gesturestart', e=>e.preventDefault());
+}
+function enableLocalPad(){
+  if(LOCALPAD || MODE==='ctrl') return;
+  LOCALPAD = true;
+  const p = document.getElementById('padUI');
+  p.classList.add('local'); p.style.display='flex';
+  bindPadControls(TCTRL, ()=>{});
+}
+let ctrlStarted = false;
+function startCtrl(code){
+  if(ctrlStarted) return;
+  ctrlStarted = true; MODE='ctrl';
+  document.getElementById('wrap').style.display='none';
+  document.getElementById('chooseUI').style.display='none';
+  const padUI=document.getElementById('padUI'); padUI.style.display='flex';
+  const top=document.getElementById('padTop');
+  const st={x:0,y:0,a:false,s:false};
+  let conn=null, connected=false, attempts=0;
+  const send=()=>{ if(connected){ try{ conn.send({t:'i',x:Math.round(st.x*100)/100,y:Math.round(st.y*100)/100,a:st.a,s:st.s}); }catch(e){} } };
+  setInterval(send, 100);
+  top.textContent='Ansluter till '+code.toUpperCase()+'…';
+  const peer = new Peer(ICE_OPTS);
+  peer.on('disconnected', ()=>{ try{ peer.reconnect(); }catch(e){} });
+  const tryConnect=()=>{
+    attempts++;
+    conn = peer.connect('gard-'+code.toLowerCase(), {reliable:true});
+    conn.on('open', ()=>{ connected=true; attempts=0; top.innerHTML='<b style="color:#8fb56a">Ansluten!</b> Tryck ANVÄND för att gå med.'; });
+    let nmFragad = false;
+    conn.on('data', d=>{
+      if(!d||d.t!=='you') return;
+      if(d.st==='lobby') top.innerHTML='Ansluten till <b>'+code.toUpperCase()+'</b> — tryck ANVÄND för att gå med!';
+      else if(d.st==='name'){
+        top.innerHTML='<span style="color:'+d.color+'">&#9632;</span> Skriv ditt namn…';
+        if(!nmFragad){
+          nmFragad = true;
+          setTimeout(()=>{
+            const v = prompt('Vad heter din bonde? (tomt = Bonde #'+d.n+')') || '';
+            try{ conn.send({t:'nm', v:v.slice(0,12)}); }catch(e){}
+          }, 50);
+        }
+      }
+      else if(d.st==='select'){
+        nmFragad = false;
+        top.innerHTML='<span style="color:'+d.color+'">&#9632; '+d.cls+'</span>'+(d.ready?' — <b style="color:#8fb56a">REDO!</b>':' — styr åt sidorna: byt bonde · VERKTYG: bygg egen · ANVÄND: vidare');
+      }
+      else top.innerHTML='<span style="color:'+d.color+'">&#9632; '+d.cls+'</span> · Energi '+d.en+' · Verktyg: <b>'+d.tool+'</b> (VERKTYG byter)';
+    });
+    conn.on('close', ()=>{ if(connected){ connected=false; top.innerHTML='<b style="color:#ff8a6a">Tappade anslutningen.</b> Försöker igen…'; setTimeout(tryConnect,2000); } });
+    conn.on('error', ()=>{});
+  };
+  const retry=()=>{
+    if(connected) return;
+    if(attempts<6){ top.innerHTML='Hittar inte spelet <b>'+code.toUpperCase()+'</b> — försöker igen ('+attempts+'/5)…'; setTimeout(tryConnect,2500); }
+    else top.innerHTML='<b style="color:#ff8a6a">Kunde inte ansluta.</b> Kolla koden och att spelet är igång, ladda om.';
+  };
+  peer.on('open', tryConnect);
+  peer.on('error', err=>{ if(err&&err.type==='peer-unavailable') retry(); else if(!connected&&attempts>0&&err&&err.type!=='disconnected') retry(); });
+  bindPadControls(st, send);
+}
+
+// ===================== SPELARE =====================
+// verktygsmodell: id-verktyg kan levlas (tier 0=trä, 1=koppar → ikonen byter färg), seed = frö
+const TOOLDEF = [
+  {id:'hoe',   namn:'Hacka'},
+  {id:'can',   namn:'Vattenkanna'},
+  {id:'axe',   namn:'Yxa'},
+  {id:'pick',  namn:'Gruvhacka'},
+  {id:'sword', namn:'Svärd'},
+  {namn:'Morotsfrö',    seed:'carrot'},
+  {namn:'Potatisfrö',   seed:'potato'},
+  {namn:'Jordgubbsfrö', seed:'straw'}
+];
+const TIERNAMN = ['', 'Koppar'];
+const MATDEF = { wood:'stockar', stone:'sten', ore:'kopparmalm', ingot:'koppartackor', goo:'slem' };
+const MATPRIS = { goo:8 };
+let players = [], joiners = [], state = 'select', paused = false;
+let time = 0, cam = {x:0,y:0}, camSnap = true;
+let toastMsg = null, toastT = 0;
+function toast(m){ toastMsg=m; toastT=3; }
+let parts = [], texts = [];
+function ftext(x,y,txt,col){ texts.push({x,y,txt,col,ttl:1.2}); }
+function burst(x,y,col,n){ for(let i=0;i<n;i++){ const a=Math.random()*Math.PI*2, s=30+Math.random()*60; parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-30,ttl:0.5,max:0.5,col,sz:2+Math.random()*2}); } }
+
+function makePlayer(i, ctrlId, def, name){
+  return {
+    id:i, ctrlId, def, name: name || ('Bonde #'+(i+1)), col: CHARCOLS[i%CHARCOLS.length],
+    x:(HOUSE.tx+4)*TS+16+(i%3)*30, y:(HOUSE.ty+HOUSE.h)*TS+20+Math.floor(i/3)*30,
+    dir:0, anim:'idle', animT:0, busy:0, actAt:0, actDone:false,
+    tool:0, energy:100,
+    seeds:{carrot:10, potato:6, straw:4},
+    carry:{carrot:0, potato:0, straw:0},
+    mats:{wood:0, stone:0, ore:0, ingot:0, goo:0},
+    tier:{hoe:0, can:0, axe:0, pick:0, sword:0},
+    lastCrop:null, hurtT:0,
+    moving:false
+  };
+}
+function scanForJoiners(){
+  const used = new Set([...joiners.map(j=>j.ctrlId), ...players.map(p=>p.ctrlId)]);
+  const cand = ['k0','k1', ...Object.keys(NET.ctrls).filter(i=>NET.ctrls[i].alive)];
+  if(LOCALPAD) cand.push('t0');
+  const gps = pads();
+  for(let i=0;i<gps.length;i++) if(gps[i]) cand.push('p'+i);
+  for(const id of cand){
+    if(used.has(id)) continue;
+    if(C(id).aJP && players.length+joiners.length<5){
+      const ci = (players.length+joiners.length)%5;
+      const j = { ctrlId:id, ci, def:{...PRESETS[ci]}, step:'pick', row:0, name:'', ready:false, fresh:true, nmSkickad:false };
+      preloadDef(j.def);
+      joiners.push(j);
+    }
+  }
+}
+function startGame(){
+  buildMap();
+  const sv = loadSave();
+  players = joiners.map((j,i)=>makePlayer(i, j.ctrlId, j.def || {...PRESETS[j.ci%5]}, j.name));
+  joiners = [];
+  if(sv && (sv.v===2||sv.v===3) && sv.kinds && (sv.kinds.length===MW*MH || sv.kinds.length===MW*WORLD_H)){
+    dag = sv.dag||1; coins = sv.coins||0; vader = sv.vader||'sol';
+    for(let i=0;i<Math.min(map.length, sv.kinds.length);i++){
+      map[i].kind = sv.kinds[i];
+      const s = sv.soil && sv.soil[i];
+      if(s && typeof s==='object'){
+        map[i].soil = { wet:!!s.w, wetT:s.w?60:0, crop: s.c ? {id:s.c.i, stage:s.c.s, prog:s.c.p} : null };
+        if(map[i].kind!==4) map[i].kind = 4;
+      }
+    }
+    // interiören + dörren är facit oavsett vad saven säger (äldre saves saknar rummet)
+    for(let y=WORLD_H;y<MH;y++) for(let x=0;x<MW;x++) map[y*MW+x].kind = 3;
+    for(let y=ROOM.y0;y<=ROOM.y1;y++) for(let x=ROOM.x0;x<=ROOM.x1;x++) map[y*MW+x].kind = 0;
+    map[BED.ty*MW+BED.tx].kind=3; map[BED.ty*MW+BED.tx+1].kind=3;
+    map[(BED.ty+1)*MW+BED.tx].kind=3; map[(BED.ty+1)*MW+BED.tx+1].kind=3;
+    map[DOOR_OUT.ty*MW+DOOR_OUT.tx].kind = 0; map[DOOR_OUT.ty*MW+DOOR_OUT.tx+1].kind = 0;
+    for(const cr of CRATES){ map[cr.ty*MW+cr.tx].kind = 3; map[(cr.ty-1)*MW+cr.tx].kind = 3; }
+    map[CHEST.ty*MW+CHEST.tx].kind = 3;
+    players.forEach((p,i)=>{ const sp=sv.pl&&sv.pl[i]; if(sp){
+      p.seeds=sp.seeds||p.seeds; p.carry=sp.carry||p.carry; p.energy=sp.en??100;
+      if(sp.mats) p.mats = Object.assign(p.mats, sp.mats);
+      if(sp.tier) p.tier = Object.assign(p.tier, sp.tier);
+      if(sp.tool!==undefined && sp.tool<TOOLDEF.length) p.tool = sp.tool;
+    } });
+    // träd/noder är facit — kartans kinds skrivs om EFTER dem (gamla saves saknar noderna helt)
+    if(sv.trees && sv.trees.length===trees.length)
+      trees.forEach((t,i)=>{ t.stump = !!sv.trees[i].s; t.regrowDag = sv.trees[i].r||0; t.hp = sv.trees[i].hp??3; });
+    if(sv.nodes && sv.nodes.length===nodes.length)
+      nodes.forEach((n,i)=>{ n.brutet = !!sv.nodes[i]; });
+    if(sv.crates) crateCount = Object.assign(crateCount, sv.crates);
+    for(const t of trees) map[t.ty*MW+t.tx].kind = t.stump ? 0 : 3;
+    for(const n of nodes) map[n.ty*MW+n.tx].kind = n.brutet ? 0 : 3;
+    map[FORGE.ty*MW+FORGE.tx].kind = 3; map[ANVILP.ty*MW+ANVILP.tx].kind = 3;
+    if(dag>=2) spawnSlimes();
+    toast('Välkomna tillbaka! Dag '+dag);
+  } else {
+    toast('Välkomna till gården! Hacka jorden med [1], så med [3-5]');
+  }
+  klockT = 0; natt = false;
+  state='play'; camSnap=true;
+}
+
+function facingTile(p){
+  const dx = [0,0,-1,1][p.dir]??0, dy = [1,-1,0,0][p.dir]??1;
+  // dir: 0 ner, 1 upp, 2 vänster, 3 höger
+  const fx = p.dir===2?-1:p.dir===3?1:0;
+  const fy = p.dir===0?1:p.dir===1?-1:0;
+  return [Math.floor((p.x+fx*24)/TS), Math.floor((p.y+8+fy*24)/TS)];
+}
+function useTool(p){
+  // lådorna: bär du något som MATCHAR en låda inom räckhåll väljs den — annars närmaste
+  let valdLada = null, bd = 46;
+  for(const cr of CRATES){
+    const d = dist(p.x, p.y, cr.tx*TS+16, cr.ty*TS+16);
+    if(p.carry[cr.crop]>0 && d < 75){ valdLada = cr; break; }
+    if(d < bd){ bd = d; valdLada = cr; }
+  }
+  if(valdLada){
+    const cr = valdLada, n = p.carry[cr.crop];
+    if(n>0){
+      crateCount[cr.crop] += n; p.carry[cr.crop] = 0;
+      if(Object.values(p.carry).every(v=>!v)) p.lastCrop = null;
+      burst(cr.tx*TS+16, cr.ty*TS, '#e8c96a', 8);
+      ftext(cr.tx*TS+16, cr.ty*TS-14, '+'+n+' '+CROPS[cr.crop].namn+' i lådan!', '#e8c96a');
+      save();
+    }
+    else if(Object.values(p.carry).some(v=>v)) ftext(cr.tx*TS+16, cr.ty*TS-14, 'Fel låda — '+CROPS[cr.crop].namn.toLowerCase()+' hit!', '#ff8a6a');
+    else ftext(cr.tx*TS+16, cr.ty*TS-14, CROPS[cr.crop].namn+': '+crateCount[cr.crop]+' st — säljs i kväll', '#f2ead6');
+    return;
+  }
+  if(dist(p.x, p.y, CHEST.tx*TS+16, CHEST.ty*TS+16) < 60){ sellCarry(p); return; }
+  if(dist(p.x, p.y, FORGE.tx*TS+16, FORGE.ty*TS+16) < 60){ useForge(p); return; }
+  if(dist(p.x, p.y, ANVILP.tx*TS+16, ANVILP.ty*TS+16) < 60){ useAnvil(p); return; }
+  const [tx,ty] = facingTile(p);
+  if(tx<0||ty<0||tx>=MW||ty>=MH) return;
+  const t = map[ty*MW+tx];
+  // skörda moget oavsett verktyg — med upplockningsanimation, grödan bärs synligt
+  if(t.soil && t.soil.crop && t.soil.crop.stage>=STAGES){
+    const c = t.soil.crop;
+    startAct(p, 'pick', ()=>{
+      p.carry[c.id]++; p.lastCrop = c.id;
+      burst(tx*TS+16, ty*TS+16, '#e8c96a', 8);
+      ftext(tx*TS+16, ty*TS, '+1 '+CROPS[c.id].namn, '#e8c96a');
+      if(CROPS[c.id].regrow){ c.stage = CROPS[c.id].regrow; c.prog = c.stage*(CROPS[c.id].tid/STAGES); }
+      else t.soil.crop = null;
+      p.energy = Math.max(0, p.energy-1);
+    });
+    return;
+  }
+  if(p.energy<=0){ ftext(p.x, p.y-40, 'Trött! Sov (T)', '#ff8a6a'); return; }
+  const td = TOOLDEF[p.tool];
+  const kost = n => Math.max(1, n - (td.id && p.tier[td.id] ? 1 : 0)); // koppar = billigare
+  if(td.id==='hoe'){
+    const inField = tx>=FIELD.x0&&tx<=FIELD.x1&&ty>=FIELD.y0&&ty<=FIELD.y1;
+    if(t.kind===0 && inField && !t.soil){ startAct(p,'hoe',()=>{ t.kind=4; t.soil={wet:false,wetT:0,crop:null}; p.energy=Math.max(0,p.energy-kost(3)); burst(tx*TS+16,ty*TS+16,'#a06a3a',6); }); }
+    else if(t.kind===0 && !inField) ftext(tx*TS+16, ty*TS, 'Odla på fältet →', '#9aab88');
+  } else if(td.id==='can'){
+    if(t.soil){ startAct(p,'water',()=>{ t.soil.wet=true; t.soil.wetT=90; p.energy=Math.max(0,p.energy-kost(1)); burst(tx*TS+16,ty*TS+16,'#5b93e8',6); }); }
+  } else if(td.id==='axe'){
+    const tr = trees.find(t2=>!t2.stump && dist(tx*TS+16, ty*TS+16, t2.tx*TS+16, t2.ty*TS+16) < 40);
+    if(tr){
+      startAct(p,'axe',()=>{
+        tr.hp -= 1 + p.tier.axe; tr.shakeT = 0.3;
+        burst(tr.tx*TS+16, tr.ty*TS-20, '#5a8f3e', 8);
+        p.energy = Math.max(0, p.energy-kost(3));
+        if(tr.hp<=0){
+          tr.stump = true; tr.regrowDag = dag+2;
+          map[tr.ty*MW+tr.tx].kind = 0;
+          p.mats.wood += 3;
+          burst(tr.tx*TS+16, tr.ty*TS, '#8a5a2a', 14);
+          ftext(tr.tx*TS+16, tr.ty*TS-10, '+3 stockar!', '#e8c96a');
+        }
+      });
+    } else ftext(p.x, p.y-40, 'Sikta på ett träd', '#9aab88');
+  } else if(td.id==='pick'){
+    const nd = nodes.find(n=>!n.brutet && n.tx===tx && n.ty===ty);
+    if(nd){
+      startAct(p,'pickx',()=>{
+        nd.hp -= 1 + p.tier.pick;
+        burst(nd.tx*TS+16, nd.ty*TS+8, nd.type==='copper'?'#e08a3c':'#9a9a9a', 8);
+        p.energy = Math.max(0, p.energy-kost(3));
+        if(nd.hp<=0){
+          nd.brutet = true;
+          map[nd.ty*MW+nd.tx].kind = 0;
+          if(nd.type==='copper'){ p.mats.ore += 2; ftext(nd.tx*TS+16, nd.ty*TS-10, '+2 kopparmalm!', '#e08a3c'); }
+          else { p.mats.stone += 2; ftext(nd.tx*TS+16, nd.ty*TS-10, '+2 sten', '#c9c9c9'); }
+        }
+      });
+    } else ftext(p.x, p.y-40, 'Sikta på en sten', '#9aab88');
+  } else if(td.id==='sword'){
+    startAct(p,'sword',()=>{
+      const fx = tx*TS+16, fy = ty*TS+16;
+      let hit = false;
+      for(const s of slimes){
+        if(s.deadT>0) continue;
+        if(dist(s.x, s.y, fx, fy) < 46 || dist(s.x, s.y, p.x, p.y) < 40){
+          hit = true;
+          s.hp -= 1 + p.tier.sword; s.hurtT = 0.25;
+          const kn = Math.atan2(s.y-p.y, s.x-p.x);
+          s.vx = Math.cos(kn)*160; s.vy = Math.sin(kn)*160;
+          burst(s.x, s.y, '#7ec8e8', 8);
+          if(s.hp<=0){ s.deadT = 0.5; p.mats.goo++; ftext(s.x, s.y-20, '+1 slem', '#7ec8e8'); }
+        }
+      }
+      p.energy = Math.max(0, p.energy-kost(2));
+      if(!hit) burst(fx, fy, '#d8d8c0', 4);
+    });
+  } else if(td.seed){
+    const id = td.seed;
+    if(t.soil && !t.soil.crop && p.seeds[id]>0){
+      p.seeds[id]--;
+      t.soil.crop = { id, stage:0, prog:0 };
+      burst(tx*TS+16, ty*TS+16, '#8fb56a', 6);
+    } else if(t.soil && !t.soil.crop) ftext(p.x, p.y-40, 'Slut på '+td.namn, '#ff8a6a');
+  }
+}
+// ugnen: smält 2 kopparmalm + 1 stock → 1 tacka (20 s)
+function useForge(p){
+  if(forge.active){ ftext(FORGE.tx*TS+16, FORGE.ty*TS-14, 'Ugnen jobbar… '+Math.ceil(forge.t)+' s', '#e8a25c'); return; }
+  if(p.mats.ore>=2 && p.mats.wood>=1){
+    p.mats.ore -= 2; p.mats.wood -= 1;
+    forge.active = true; forge.t = 20; forge.owner = p.id;
+    burst(FORGE.tx*TS+16, FORGE.ty*TS, '#e8a25c', 10);
+    toast('Ugnen smälter kopparmalm… (20 s)');
+  } else ftext(FORGE.tx*TS+16, FORGE.ty*TS-14, 'Behövs: 2 malm + 1 stock', '#9aab88');
+}
+// städet: smid nästa kopparverktyg för 2 tackor (hacka→kanna→yxa→gruvhacka→svärd)
+function useAnvil(p){
+  const nasta = ['hoe','can','axe','pick','sword'].find(id=>p.tier[id]===0);
+  if(!nasta){ ftext(ANVILP.tx*TS+16, ANVILP.ty*TS-14, 'Allt är redan koppar!', '#e8c96a'); return; }
+  const namn = TOOLDEF.find(d=>d.id===nasta).namn;
+  if(p.mats.ingot>=2){
+    p.mats.ingot -= 2;
+    p.tier[nasta] = 1;
+    burst(ANVILP.tx*TS+16, ANVILP.ty*TS, '#e8a25c', 14);
+    toast('Smidde Koppar'+namn.toLowerCase()+'! (2 tackor)');
+    save();
+  } else ftext(ANVILP.tx*TS+16, ANVILP.ty*TS-14, namn+' i koppar: 2 tackor', '#9aab88');
+}
+// ==== builder- och namnsteg på startskärmen ====
+const BUILDROWS = [
+  { namn:'Kropp',   visa:d=>d.gender==='Male'?'Kille':'Tjej' },
+  { namn:'Hudton',  visa:d=>'Ton '+d.skin },
+  { namn:'Frisyr',  visa:d=>d.hair },
+  { namn:'Hårfärg', visa:d=>({Brown:'Brun',Black:'Svart',Blonde:'Blond',Ginger:'Röd'})[d.hairCol] },
+  { namn:'Kläder',  visa:d=>({Blue:'Blå',Red:'Röd',Green:'Grön',Purple:'Lila',Pink:'Rosa'})[d.cloth] }
+];
+function adjustDef(def, row, dir){
+  const cyc = (arr, cur, d)=>arr[(arr.indexOf(cur)+d+arr.length)%arr.length];
+  if(row===0) def.gender = def.gender==='Male' ? 'Female' : 'Male';
+  else if(row===1) def.skin = ((def.skin-1+dir+4)%4)+1;
+  else if(row===2) def.hair = cyc(HAIRSTYLES, def.hair, dir);
+  else if(row===3) def.hairCol = cyc(HAIRCOLS, def.hairCol, dir);
+  else def.cloth = cyc(CLOTHCOLS, def.cloth, dir);
+}
+function startNameStep(j){
+  j.step = 'name';
+  j.nmSkickad = false; // mobilen får en namnfråga via pushStatus
+}
+function finishName(j){
+  j.name = (j.name||'').trim().slice(0,12);
+  j.step = 'ready'; j.ready = true;
+}
+// tangentbordsspelare skriver namnet direkt
+window.addEventListener('keydown', e=>{
+  if(state!=='select') return;
+  const j = joiners.find(j2=>(j2.ctrlId==='k0'||j2.ctrlId==='k1') && j2.step==='name');
+  if(!j) return;
+  if(e.key==='Backspace'){ j.name = j.name.slice(0,-1); e.preventDefault(); }
+  else if(e.key==='Enter'){ /* aJP för k1 sköter det — men fånga för k0 också */ }
+  else if(e.key.length===1 && e.key!==' ' && j.name.length<12 && /[a-zA-ZåäöÅÄÖ0-9!.-]/.test(e.key)){
+    j.name += e.key; e.preventDefault();
+  }
+});
+function startAct(p, anim, fn){
+  p.anim = anim; p.animT = 0;
+  const tid = { water:0.7, pick:0.6, sword:0.45 }[anim] ?? 0.55;
+  const snabb = { hoe:'hoe', water:'can', axe:'axe', pickx:'pick', sword:'sword' }[anim];
+  p.busy = tid * (snabb && p.tier[snabb] ? 0.72 : 1); // kopparverktyg jobbar snabbare
+  p.actAt = p.busy*0.55; p.actFn = fn; p.actDone = false;
+}
+function sellCarry(p){
+  // kistan tar bara monsterloot numera — grönsakerna ska i lådorna
+  const sum = p.mats.goo * MATPRIS.goo;
+  p.mats.goo = 0;
+  if(sum>0){ coins += sum; ftext(CHEST.tx*TS+16, CHEST.ty*TS-6, '+'+sum+' kr för slem!', '#e8c96a'); burst(CHEST.tx*TS+16, CHEST.ty*TS+8, '#e8c96a', 12); save(); }
+  else if(Object.values(p.carry).some(v=>v)) ftext(CHEST.tx*TS+16, CHEST.ty*TS-6, 'Grönsaker → lådorna!', '#9aab88');
+  else ftext(CHEST.tx*TS+16, CHEST.ty*TS-6, 'Kistan köper slem & loot', '#9aab88');
+}
+function sellCrates(){
+  let sum = 0;
+  for(const id in crateCount){ sum += crateCount[id]*CROPS[id].pris; crateCount[id] = 0; }
+  if(sum>0) coins += sum;
+  return sum;
+}
+function trySleep(){
+  // sova: nära husdörren eller på natten var som helst
+  const p0 = players[0];
+  const nearHouse = p0 && dist(p0.x, p0.y, (HOUSE.tx+4)*TS, (HOUSE.ty+HOUSE.h)*TS) < 120;
+  const nearBed = p0 && dist(p0.x, p0.y, (BED.tx+1)*TS, (BED.ty+1)*TS) < 140;
+  if(!natt && !nearHouse && !nearBed){ toast('Gå hem till sängen för att sova — eller vänta till natten (T)'); return; }
+  dag++;
+  klockT = 0; natt = false;
+  const salt = sellCrates();
+  dayRefresh();
+  toast('God morgon! Dag '+dag+' — '+(vader==='regn'?'regn (allt vattnas gratis!)':'sol')+(salt>0?' · Lådorna sålda: +'+salt+' kr!':''));
+  save();
+}
+
+function updPlayer(p, dt){
+  const c = C(p.ctrlId);
+  if(p.busy>0){
+    p.busy -= dt; p.animT += dt;
+    if(!p.actDone && p.busy < p.actAt){ p.actDone = true; if(p.actFn) p.actFn(); }
+    if(p.busy<=0){ p.anim='idle'; p.animT=0; }
+    return;
+  }
+  let dx = c.x, dy = c.y;
+  const l = Math.hypot(dx,dy);
+  p.moving = l>0.1;
+  if(p.moving){
+    dx/=l; dy/=l;
+    p.dir = Math.abs(dx)>Math.abs(dy) ? (dx>0?3:2) : (dy>0?0:1);
+    const spd = 130;
+    const nx = p.x+dx*spd*dt, ny = p.y+dy*spd*dt;
+    // fot-hitbox (inte bara en punkt) så spriten aldrig kan kliva in i väggar
+    const fri = (x,y)=>!solidAt(Math.floor(x/TS), Math.floor(y/TS));
+    const stod = (x,y)=> fri(x-9,y+4) && fri(x+9,y+4) && fri(x-9,y+14) && fri(x+9,y+14);
+    if(stod(nx, p.y)) p.x = nx;
+    if(stod(p.x, ny)) p.y = ny;
+    p.x = clamp(p.x, TS+8, (MW-1)*TS-8);
+    p.y = clamp(p.y, TS+8, (MH-1)*TS-8);
+    p.anim = 'walk';
+    // dörren: hela familjen följer med in/ut (kameran klarar inte delade världar)
+    const ptx = Math.floor(p.x/TS), pty = Math.floor((p.y+10)/TS);
+    if((ptx===DOOR_OUT.tx||ptx===DOOR_OUT.tx+1) && pty===DOOR_OUT.ty){
+      players.forEach((pl,i)=>{ pl.x = ROOM_ENTRY.tx*TS+16+(i%3)*20; pl.y = ROOM_ENTRY.ty*TS+2+Math.floor(i/3)*12; });
+      camSnap = true; toast('Hemma! Sov i sängen med T — mattan leder ut');
+    } else if((ptx===ROOM_EXIT.tx||ptx===ROOM_EXIT.tx+1) && pty===ROOM_EXIT.ty){
+      players.forEach((pl,i)=>{ pl.x = DOOR_SPAWN.tx*TS+16+(i%3)*16; pl.y = DOOR_SPAWN.ty*TS+18+Math.floor(i/3)*12; });
+      camSnap = true;
+    }
+  } else p.anim = 'idle';
+  p.animT += dt;
+  if(c.aJP) useTool(p);
+  if(c.sJP){ p.tool = (p.tool+1)%TOOLDEF.length; ftext(p.x, p.y-40, TOOLDEF[p.tool].namn, '#f2ead6'); }
+  // sifferknappar (tangentbord) — latchade så snabba tryck aldrig missas
+  if(p.ctrlId==='k0'||p.ctrlId==='k1'){
+    for(let i=0;i<TOOLDEF.length;i++){
+      const code = 'Digit'+(i+1);
+      if(keys[code]||kbLatch[code]){ p.tool=i; kbLatch[code]=false; }
+    }
+  }
+}
+
+// ===================== UPPDATERING =====================
+function update(dt){
+  time += dt;
+  pollInputs();
+  pushStatus();
+  if(toastT>0) toastT -= dt;
+
+  if(state==='select'){
+    scanForJoiners();
+    for(const j of joiners){
+      const c = C(j.ctrlId);
+      if(j.fresh){ j.fresh=false; continue; }
+      if(j.step==='pick'){
+        if(c.lJP){ j.ci = (j.ci+4)%5; j.def = {...PRESETS[j.ci]}; preloadDef(j.def); }
+        if(c.rJP){ j.ci = (j.ci+1)%5; j.def = {...PRESETS[j.ci]}; preloadDef(j.def); }
+        if(c.sJP){ j.step = 'build'; j.row = 0; }
+        else if(c.aJP) startNameStep(j);
+      } else if(j.step==='build'){
+        if(c.uJP) j.row = (j.row+4)%5;
+        if(c.dJP) j.row = (j.row+1)%5;
+        const rikt = c.lJP ? -1 : c.rJP ? 1 : 0;
+        if(rikt){ adjustDef(j.def, j.row, rikt); preloadDef(j.def); }
+        if(c.sJP) j.step = 'pick';
+        else if(c.aJP) startNameStep(j);
+      } else if(j.step==='name'){
+        if(c.aJP) finishName(j);
+      } else if(j.step==='ready'){
+        if(c.sJP){ j.step = 'pick'; j.ready = false; }
+      }
+    }
+    joiners = joiners.filter(j=>!j.remove);
+    if(joiners.length>0 && joiners.every(j=>j.ready)){
+      selCount -= dt;
+      if(selCount<=0) startGame();
+    } else selCount = 2;
+    return;
+  }
+  if(paused) return;
+
+  // drop-in mitt i spelet
+  scanForJoiners();
+  joiners = joiners.filter(j=>j.ctrlId[0]!=='n' || (NET.ctrls[j.ctrlId]&&NET.ctrls[j.ctrlId].alive));
+  for(const j of joiners){
+    const c = C(j.ctrlId);
+    if(j.fresh){ j.fresh=false; continue; }
+    if(c.lJP){ j.ci=(j.ci+4)%5; j.def={...PRESETS[j.ci]}; preloadDef(j.def); }
+    if(c.rJP){ j.ci=(j.ci+1)%5; j.def={...PRESETS[j.ci]}; preloadDef(j.def); }
+    if(c.aJP) j.spawn=true;
+    if(c.sJP) j.remove=true;
+  }
+  joiners.filter(j=>j.spawn).forEach(j=>{
+    const np = makePlayer(players.length, j.ctrlId, j.def || {...PRESETS[j.ci%5]}, j.name);
+    players.push(np);
+    toast(np.name+' hoppar in på gården!');
+  });
+  joiners = joiners.filter(j=>!j.spawn && !j.remove);
+
+  for(const p of players) updPlayer(p, dt);
+
+  // träd-skak + ugnstimer + slimes
+  for(const tr of trees) if(tr.shakeT>0) tr.shakeT -= dt;
+  if(forge.active){
+    forge.t -= dt;
+    if(forge.t<=0){
+      forge.active = false;
+      const agare = players.find(pl=>pl.id===forge.owner) || players[0];
+      if(agare){ agare.mats.ingot++; toast('Koppartackan är klar!'); burst(FORGE.tx*TS+16, FORGE.ty*TS, '#e8a25c', 12); }
+    }
+  }
+  if(!natt) for(const s of slimes){
+    if(s.deadT>0){ s.deadT -= dt; continue; }
+    s.animT += dt;
+    if(s.hurtT>0){ s.hurtT -= dt; s.x += s.vx*dt; s.y += s.vy*dt; s.vx*=0.85; s.vy*=0.85; continue; }
+    // mål: närmaste spelare inom 150 px, annars strövmål
+    let narm = null, nd2 = 150;
+    for(const pl of players){ const d2 = dist(s.x,s.y,pl.x,pl.y); if(d2<nd2){ nd2=d2; narm=pl; } }
+    s.malT -= dt;
+    if(narm) s.mal = {x:narm.x, y:narm.y};
+    else if(!s.mal || s.malT<=0){ s.mal = {x:s.x+(Math.random()-0.5)*180, y:s.y+(Math.random()-0.5)*180}; s.malT = 2+Math.random()*2; }
+    const dl = dist(s.x,s.y,s.mal.x,s.mal.y);
+    if(dl>6){
+      const sp = narm ? 55 : 30;
+      const nx2 = s.x + (s.mal.x-s.x)/dl*sp*dt, ny2 = s.y + (s.mal.y-s.y)/dl*sp*dt;
+      if(!solidAt(Math.floor(nx2/TS), Math.floor(s.y/TS))) s.x = nx2;
+      if(!solidAt(Math.floor(s.x/TS), Math.floor(ny2/TS))) s.y = ny2;
+      s.dir = Math.abs(s.mal.x-s.x)>Math.abs(s.mal.y-s.y) ? (s.mal.x>s.x?3:2) : (s.mal.y>s.y?0:1);
+    }
+    // nudda spelare = energi-stöt + knuff
+    for(const pl of players){
+      if(pl.hurtT>0) continue;
+      if(dist(s.x,s.y,pl.x,pl.y) < 22){
+        pl.energy = Math.max(0, pl.energy-6); pl.hurtT = 1;
+        ftext(pl.x, pl.y-44, '-6 energi!', '#ff8a6a');
+        const kn = Math.atan2(pl.y-s.y, pl.x-s.x);
+        pl.x += Math.cos(kn)*18; pl.y += Math.sin(kn)*18;
+      }
+    }
+  }
+  slimes = slimes.filter(s=>!(s.deadT<0 || (s.deadT>0 && s.deadT<=dt)));
+  for(const pl of players) if(pl.hurtT>0) pl.hurtT -= dt;
+
+  // klockan
+  klockT += dt;
+  if(!natt && klockT >= DAG_S){ natt = true; klockT = 0; slimes = []; toast('Natten faller — timers pausade. Tryck T för att sova!'); }
+  else if(natt && klockT >= NATT_S){ trySleepAuto(); }
+
+  // grödor växer i realtid — bara på dagen (Trygg natt)
+  if(!natt){
+    for(const t of map){
+      if(!t.soil) continue;
+      if(vader==='regn') { t.soil.wet = true; t.soil.wetT = 90; }
+      if(t.soil.wet){
+        t.soil.wetT -= dt;
+        if(t.soil.wetT<=0) t.soil.wet = false;
+        const cr = t.soil.crop;
+        if(cr && cr.stage<STAGES){
+          cr.prog += dt;
+          const per = CROPS[cr.id].tid/STAGES;
+          if(cr.prog >= per*(cr.stage+1)) cr.stage++;
+        }
+      }
+    }
+  }
+
+  for(const pt of parts){ pt.ttl-=dt; pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.vy+=120*dt; }
+  parts = parts.filter(p=>p.ttl>0);
+  for(const t of texts){ t.ttl-=dt; t.y-=26*dt; }
+  texts = texts.filter(t=>t.ttl>0);
+
+  // kamera
+  let cx=0, cy=0;
+  players.forEach(p=>{ cx+=p.x; cy+=p.y; });
+  cx/=players.length||1; cy/=players.length||1;
+  const txx = clamp(cx-VW/2, 0, MW*TS-VW), tyy = clamp(cy-VH/2, 0, MH*TS-VH);
+  if(camSnap){ cam.x=txx; cam.y=tyy; camSnap=false; }
+  else { cam.x=lerp(cam.x,txx,dt*5); cam.y=lerp(cam.y,tyy,dt*5); }
+
+  if(players.length>1){
+    for(const p of players){
+      p.x = clamp(p.x, cam.x+20, cam.x+VW-20);
+      p.y = clamp(p.y, cam.y+26, cam.y+VH-10);
+    }
+  }
+}
+let selCount = 2;
+function trySleepAuto(){
+  dag++; klockT=0; natt=false;
+  const salt = sellCrates();
+  dayRefresh();
+  toast('Ny dag! Dag '+dag+' — '+(vader==='regn'?'regn!':'sol')+(salt>0?' · Lådorna sålda: +'+salt+' kr!':''));
+  save();
+}
+
+// ===================== RENDERING =====================
+// gräs-fyllnadstiles i arket (16px-koordinater i tiles)
+const GRASS_PLAIN = [6,2];                 // helt slät gräsruta
+const GRASS_DECOR = [[5,1],[7,3]];         // gles dekor
+const DIRT_TILE = [5,9];
+// blob-autotile för åkerjord: grannmask N=1 E=2 S=4 W=8 → [kol,rad] i arkets torra kvadrant (+12 kol = våt)
+const SOIL_LUT = {
+  0:[0,3], 1:[0,2], 2:[1,3], 3:[1,2], 4:[0,0], 5:[0,1], 6:[1,0], 7:[1,1],
+  8:[3,3], 9:[3,2], 10:[2,3], 11:[2,2], 12:[3,0], 13:[3,1], 14:[2,0], 15:[2,1]
+};
+function soilAutoTile(tx,ty){
+  const has = (x,y)=> x>=0 && y>=0 && x<MW && y<MH && !!map[y*MW+x].soil;
+  const m = (has(tx,ty-1)?1:0)|(has(tx+1,ty)?2:0)|(has(tx,ty+1)?4:0)|(has(tx-1,ty)?8:0);
+  return SOIL_LUT[m];
+}
+// jordstigen ligger som samma blob-layout i gräsarket, rad 8–11 (texturerad variant)
+function pathAutoTile(tx,ty){
+  const has = (x,y)=> x>=0 && y>=0 && x<MW && y<MH && map[y*MW+x].kind===1;
+  const m = (has(tx,ty-1)?1:0)|(has(tx+1,ty)?2:0)|(has(tx,ty+1)?4:0)|(has(tx-1,ty)?8:0);
+  const st = SOIL_LUT[m];
+  return [st[0], 8+st[1]];
+}
+// strandkanten ligger på GRÄS-tilesen runt vattnet (Grass Water-arkets gräsblob rad 0–3):
+// grannmask över icke-vatten → blobbens kantbit; diagonalt vatten → innerhörn ur hål-blocket (hål vid kol 10, rad 1)
+function shorePiece(tx,ty){
+  const water = (x,y)=> x>=0 && y>=0 && x<MW && y<MH && map[y*MW+x].kind===2;
+  if(!(water(tx,ty-1)||water(tx+1,ty)||water(tx,ty+1)||water(tx-1,ty)||
+       water(tx+1,ty+1)||water(tx-1,ty+1)||water(tx+1,ty-1)||water(tx-1,ty-1))) return null;
+  const m = (water(tx,ty-1)?0:1)|(water(tx+1,ty)?0:2)|(water(tx,ty+1)?0:4)|(water(tx-1,ty)?0:8);
+  if(m===15){ // radblock 8–11 = rena strandkanter (block 0–3 har bär, 12–23 har vass-dekor)
+    if(water(tx+1,ty+1)) return [9,8];
+    if(water(tx-1,ty+1)) return [11,8];
+    if(water(tx+1,ty-1)) return [9,10];
+    return [11,10];
+  }
+  const st = SOIL_LUT[m];
+  return [st[0], st[1]+8];
+}
+function drawTile(img, sx, sy, dx, dy){
+  ctx.drawImage(img, sx*16, sy*16, 16, 16, dx, dy, TS, TS);
+}
+function charSheetRow(dir){ return dir===1 ? 1 : dir===0 ? 0 : 2; } // 0 ner,1 upp,2 sida
+function drawPlayer(p, ox, oy){
+  const sx = p.x-ox, sy = p.y-oy;
+  ctx.fillStyle = 'rgba(10,16,8,0.25)';
+  ctx.beginPath(); ctx.ellipse(sx, sy+12, 11, 4, 0, 0, Math.PI*2); ctx.fill();
+  const carryN = Object.values(p.carry).reduce((a,b)=>a+b,0);
+  let ak = p.anim;
+  if(carryN>0){ if(ak==='idle') ak='cidle'; else if(ak==='walk') ak='cwalk'; }
+  if(!MODANIM[ak]) ak = 'idle';
+  const an = MODANIM[ak];
+  const fi = p.busy>0 ? Math.min(an.frames-1, Math.floor(p.animT*an.fps)) : Math.floor(p.animT*an.fps)%an.frames;
+  const td = TOOLDEF[p.tool];
+  drawModChar(ctx, p.def, ak, p.dir, fi, Math.round(sx)-32, Math.round(sy)-38, 2, td && td.id ? p.tier[td.id] : 0);
+  // den senast plockade grödan syns över huvudet medan man bär
+  if(carryN>0 && p.busy<=0 && p.lastCrop && IMG[p.lastCrop])
+    ctx.drawImage(IMG[p.lastCrop], 7*16, 0, 16, 16, Math.round(sx)-14, Math.round(sy)-54, 28, 28);
+  // namnskylt (bra när hela familjen springer runt)
+  ctx.font='bold 10px monospace'; ctx.textAlign='center';
+  ctx.fillStyle='#141c10'; ctx.fillText(p.name, Math.round(sx)+1, Math.round(sy)-41);
+  ctx.fillStyle=p.col; ctx.fillText(p.name, Math.round(sx), Math.round(sy)-42);
+}
+function draw(){
+  ctx.fillStyle = '#1a2416';
+  ctx.fillRect(0,0,VW,VH);
+  qrPanel.style.display = (NET.open && (state==='select'||joiners.length>0)) ? 'block' : 'none';
+  if(!assetsReady){
+    ctx.fillStyle='#e8c96a'; ctx.font='bold 22px monospace'; ctx.textAlign='center';
+    ctx.fillText('Laddar gården…', VW/2, VH/2);
+    return;
+  }
+  if(state==='select'){ drawSelect(); return; }
+  const ox = Math.round(cam.x), oy = Math.round(cam.y);
+  const x0 = Math.floor(ox/TS), y0 = Math.floor(oy/TS);
+  // mark — basfärg under allt så tilearkens transparenshål aldrig syns
+  ctx.fillStyle = grassBase; ctx.fillRect(0, 0, VW, VH);
+  for(let ty=y0; ty<=y0+Math.ceil(VH/TS); ty++){
+    for(let tx=x0; tx<=x0+Math.ceil(VW/TS); tx++){
+      if(tx<0||ty<0||tx>=MW||ty>=MH) continue;
+      const t = map[ty*MW+tx];
+      const dx = tx*TS-ox, dy = ty*TS-oy;
+      // interiörraderna: plankgolv i rummet, väggpanel ovanför, mörker runtom
+      if(ty>=WORLD_H){
+        // som inspirationsbilden: mörkt parkettgolv, blågrå väggband, brun ram, svart runtom
+        const iRoom = tx>=ROOM.x0 && tx<=ROOM.x1 && ty>=ROOM.y0 && ty<=ROOM.y1;
+        const iWall = tx>=ROOM.x0 && tx<=ROOM.x1 && (ty===ROOM.y0-2 || ty===ROOM.y0-1);
+        const iFrame = tx>=ROOM.x0-1 && tx<=ROOM.x1+1 && ty>=ROOM.y0-3 && ty<=ROOM.y1+1;
+        if(iRoom && IMG.houseTiles) drawTile(IMG.houseTiles, 2+(tx&1), 1+(ty&1), dx, dy);
+        else if(iWall && IMG.houseTiles) drawTile(IMG.houseTiles, 4, ty===ROOM.y0-2?6:8, dx, dy);
+        else if(iFrame){ ctx.fillStyle='#54331e'; ctx.fillRect(dx, dy, TS, TS);
+          ctx.fillStyle='#6b4327'; ctx.fillRect(dx+2, dy+2, TS-4, TS-4); }
+        else { ctx.fillStyle='#0d0b09'; ctx.fillRect(dx, dy, TS, TS); }
+        if((tx===ROOM_EXIT.tx||tx===ROOM_EXIT.tx+1) && ty===ROOM_EXIT.ty){ // utgångsmattan
+          ctx.fillStyle='rgba(138,90,52,0.85)'; ctx.fillRect(dx+2, dy+6, TS-4, TS-10);
+          ctx.fillStyle='#e8c96a'; ctx.font='bold 9px monospace'; ctx.textAlign='center';
+          ctx.fillText(tx===ROOM_EXIT.tx?'U':'T', dx+16, dy+20);
+        }
+        continue;
+      }
+      const hsh = ((tx*2654435761) ^ (ty*40503)) >>> 0;
+      if(t.kind===2){
+        ctx.drawImage(IMG.water, 0,0,16,16, dx,dy,TS,TS);
+      } else {
+        if(plainGrass) ctx.drawImage(plainGrass, 0, 0, 16, 16, dx, dy, TS, TS);
+        if(hsh%100 < 7){ const g = GRASS_DECOR[hsh%GRASS_DECOR.length]; drawTile(IMG.grass, g[0], g[1], dx, dy); }
+        const sp = shorePiece(tx, ty);
+        if(sp && (gwaterProc||IMG.gwater)) drawTile(gwaterProc||IMG.gwater, sp[0], sp[1], dx, dy);
+      }
+      if(t.kind===1){ const pt = pathAutoTile(tx, ty); drawTile(IMG.grass, pt[0], pt[1], dx, dy); }
+      if(t.soil){
+        // torr åker som bas ALLTID — våta arket är en overlay med hål som ska visa torr jord igenom
+        const st = soilAutoTile(tx, ty);
+        drawTile(soilProc||IMG.soil, st[0], st[1], dx, dy);
+        if(t.soil.wet) drawTile(IMG.soil, st[0]+12, st[1], dx, dy);
+        const cr = t.soil.crop;
+        if(cr && IMG[cr.id]){
+          const img = IMG[cr.id];
+          const fi = Math.min(cr.stage, STAGES);
+          const an = (CROP_ANCHOR[cr.id]||[])[fi] || {ax:0, ay:-6};
+          ctx.drawImage(img, fi*16, 0, 16, 16, dx+an.ax, dy+an.ay, TS, TS);
+          if(cr.stage>=STAGES && (time*2|0)%2===0){
+            ctx.fillStyle='rgba(255,240,160,0.9)';
+            ctx.fillRect(dx+24, dy-4, 3, 3);
+          }
+        }
+      }
+    }
+  }
+  // y-sorterade objekt
+  const actors = [];
+  for(const p of players) actors.push({y:p.y+14, p}); // sortera på FOTLINJEN, inte mitten — annars hamnar man bakom objekt man står tryckt emot
+  actors.push({y:(HOUSE.ty+HOUSE.h)*TS-4, house:true});
+  actors.push({y:(CHEST.ty+1)*TS-4, chest:true});
+  for(const tr of trees) actors.push({y:(tr.ty+1)*TS-2, tree:tr});
+  for(const n of nodes) if(!n.brutet) actors.push({y:(n.ty+1)*TS-1, node:n});
+  actors.push({y:(FORGE.ty+1)*TS-1, forge:true});
+  actors.push({y:(ANVILP.ty+1)*TS-1, anvil:true});
+  for(const cr of CRATES){ actors.push({y:(cr.ty+1)*TS-1, crate:cr}); actors.push({y:cr.ty*TS-1, sign:cr}); }
+  actors.push({y:(BED.ty+2)*TS-1, bed:true});
+  for(const s of slimes) actors.push({y:s.y+12, slime:s});
+  // staketet y-sorteras med allt annat — annars ritas det tvärs igenom träd och spelare
+  for(const [tx,ty] of fences) actors.push({y:(ty+1)*TS, fence:[tx,ty]});
+  actors.sort((a,b)=>a.y-b.y);
+  for(const a of actors){
+    if(a.house){
+      ctx.drawImage(IMG.house, HOUSE.tx*TS-ox, HOUSE.ty*TS-oy, IMG.house.width*2, IMG.house.height*2);
+    } else if(a.chest){
+      ctx.drawImage(IMG.chest, 8,0,16,16, CHEST.tx*TS-ox-8, CHEST.ty*TS-oy-16, 48, 48);
+      ctx.fillStyle='#e8c96a'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+      ctx.fillText('SÄLJ', CHEST.tx*TS-ox+16, CHEST.ty*TS-oy-36);
+    } else if(a.forge){
+      if(IMG.furnace){
+        const f = forge.active ? 1+((time*8|0)%4) : 0;
+        ctx.drawImage(IMG.furnace, f*32, 0, 32, 32, FORGE.tx*TS-ox-16, (FORGE.ty+1)*TS-oy-58, 64, 64);
+      }
+      ctx.fillStyle='#e8c96a'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+      ctx.fillText(forge.active ? Math.ceil(forge.t)+' s' : 'UGN', FORGE.tx*TS-ox+16, FORGE.ty*TS-oy-30);
+    } else if(a.anvil){
+      if(IMG.anvil) ctx.drawImage(IMG.anvil, ((time*5|0)%6)*32, 64, 32, 32, ANVILP.tx*TS-ox-16, (ANVILP.ty+1)*TS-oy-58, 64, 64);
+      ctx.fillStyle='#e8c96a'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+      ctx.fillText('SMEDJA', ANVILP.tx*TS-ox+16, ANVILP.ty*TS-oy-30);
+    } else if(a.bed){
+      if(IMG.beds) ctx.drawImage(IMG.beds, 7, 317, 33, 34, BED.tx*TS-ox-1, (BED.ty+2)*TS-oy-68, 66, 68);
+    } else if(a.sign){
+      const cr = a.sign;
+      // skylt bakom lådan: slot-ruta ur paketet + grödans varuikon (egen aktör så z-ordningen stämmer)
+      if(IMG.slots) ctx.drawImage(IMG.slots, 151, 6, 18, 18, cr.tx*TS-ox+3, cr.ty*TS-oy-34, 26, 26);
+      if(IMG[cr.crop]) ctx.drawImage(IMG[cr.crop], 7*16, 0, 16, 16, cr.tx*TS-ox+6, cr.ty*TS-oy-31, 20, 20);
+    } else if(a.crate){
+      const cr = a.crate;
+      const filled = crateCount[cr.crop] > 0;
+      const src = filled ? cr.src : CRATE_EMPTY;
+      if(IMG.box){
+        const w = src[2]*2, h = src[3]*2;
+        ctx.drawImage(IMG.box, src[0], src[1], src[2], src[3], cr.tx*TS-ox+16-w/2, (cr.ty+1)*TS-oy-h, w, h);
+      }
+      if(filled){
+        ctx.fillStyle='#f2ead6'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+        ctx.fillText(crateCount[cr.crop], cr.tx*TS-ox+27, (cr.ty+1)*TS-oy-2);
+      }
+    } else if(a.node){
+      const n = a.node;
+      // mineralstenar 19x16 i arket: x38 = koppar(orange), x70 = grå sten
+      if(IMG.minerals) ctx.drawImage(IMG.minerals, n.type==='copper'?38:70, 144, 19, 16, n.tx*TS-ox-3, (n.ty+1)*TS-oy-34, 38, 32);
+    } else if(a.slime){
+      const s = a.slime;
+      let img = s.deadT>0 ? IMG.slimeDead : s.hurtT>0 ? IMG.slimeDmg : IMG.slimeWalk;
+      if(!img) img = IMG.slimeIdle;
+      if(img){
+        const row = s.dir===1?1:s.dir===0?0:2;
+        const fi = Math.floor(s.animT*8)%4;
+        ctx.save();
+        ctx.translate(Math.round(s.x-ox), Math.round(s.y-oy));
+        if(s.dir===2) ctx.scale(-1,1);
+        ctx.fillStyle='rgba(10,16,8,0.25)';
+        ctx.beginPath(); ctx.ellipse(0, 12, 10, 4, 0, 0, Math.PI*2); ctx.fill();
+        ctx.drawImage(img, fi*32, row*32, 32, 32, -24, -26, 48, 48); // slimen ligger i cellens nederdel
+        ctx.restore();
+      }
+    } else if(a.tree){
+      const tr = a.tree;
+      if(!IMG.tree){} else if(tr.stump){
+        // stubbarna ligger på (9,131)(41,131)... — första stubben = källa (8,129,16,15)
+        ctx.drawImage(IMG.tree, 8, 129, 16, 15, tr.tx*TS-ox, (tr.ty+1)*TS-oy-30, 32, 30);
+      } else {
+        const shx = tr.shakeT>0 ? Math.sin(time*45)*2 : 0;
+        ctx.drawImage(IMG.tree, 0, 48, 32, 48, tr.tx*TS-ox-32+shx, (tr.ty+1)*TS-oy-92, 64, 96);
+      }
+    } else if(a.fence){
+      if(IMG.fence){
+        const horiz = (a.fence[1]===1 || a.fence[1]===MH-2);
+        const [sx2,sy2] = horiz ? [1,2] : [0,1];
+        ctx.drawImage(IMG.fence, sx2*16, sy2*16, 16, 16, a.fence[0]*TS-ox, a.fence[1]*TS-oy, TS, TS);
+      }
+    } else drawPlayer(a.p, ox, oy);
+  }
+  // partiklar & text
+  for(const pt of parts){
+    ctx.globalAlpha = clamp(pt.ttl/pt.max,0,1);
+    ctx.fillStyle = pt.col;
+    ctx.fillRect(pt.x-ox-pt.sz/2, pt.y-oy-pt.sz/2, pt.sz, pt.sz);
+  }
+  ctx.globalAlpha = 1;
+  ctx.font='bold 14px monospace'; ctx.textAlign='center';
+  for(const t of texts){
+    ctx.globalAlpha = clamp(t.ttl,0,1);
+    ctx.fillStyle='#141c10'; ctx.fillText(t.txt, t.x-ox+1, t.y-oy+1);
+    ctx.fillStyle=t.col; ctx.fillText(t.txt, t.x-ox, t.y-oy);
+  }
+  ctx.globalAlpha = 1;
+  // skymning/natt
+  const dagKvar = DAG_S - klockT;
+  if(!natt && dagKvar < 60){
+    ctx.fillStyle = 'rgba(20,16,60,'+(0.45*(1-dagKvar/60)).toFixed(2)+')';
+    ctx.fillRect(0,0,VW,VH);
+  } else if(natt){
+    ctx.fillStyle = 'rgba(14,12,44,0.55)';
+    ctx.fillRect(0,0,VW,VH);
+    ctx.font='bold 15px monospace';
+    drawWideBtn(VW/2-265, 38, 530, 34);
+    ctx.fillStyle='#3a2a1a'; ctx.textAlign='center';
+    ctx.fillText('Natt — timers pausade · T = sova till morgonen', VW/2, 60);
+  }
+  if(vader==='regn' && !natt){
+    ctx.strokeStyle='rgba(140,180,240,0.35)'; ctx.lineWidth=1;
+    for(let i=0;i<40;i++){
+      const rx = (i*97+time*500)%VW, ry = (i*61+time*700)%VH;
+      ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(rx-3,ry+9); ctx.stroke();
+    }
+  }
+  drawHUD();
+  if(paused) drawPauseMenu();
+  if(toastT>0){
+    ctx.font='bold 15px monospace';
+    const tb = ctx.measureText(toastMsg).width + 56;
+    ctx.globalAlpha = clamp(toastT,0,1);
+    drawWideBtn(VW/2-tb/2, 86, tb, 34);
+    ctx.fillStyle='#3a2a1a'; ctx.textAlign='center';
+    ctx.fillText(toastMsg, VW/2, 108);
+    ctx.globalAlpha = 1;
+  }
+  // drop-in-panel (träpanel + bondens sprite)
+  joiners.forEach((j,k)=>{
+    const wd=430, x=VW/2-wd/2, y=VH-76-k*54;
+    drawPanel(THEME.brown, x, y, wd, 48);
+    if(j.def) drawModChar(ctx, j.def, 'idle', 0, Math.floor(time*5)%4, x+8, y+3, 1.3, 0);
+    ctx.font='bold 13px monospace'; ctx.textAlign='left'; ctx.fillStyle='#f2ead6';
+    ctx.fillText('< byt look >   ANVÄND = hoppa in!', x+54, y+28);
+  });
+}
+function toolIconDraw(ti, x, y, s, tiers){
+  const td = TOOLDEF[ti];
+  if(td.seed){
+    if(IMG[td.seed]) ctx.drawImage(IMG[td.seed], 7*16, 0, 16, 16, x, y, s, s);
+  } else {
+    const t2 = tiers ? tiers[td.id] : 0;
+    const icon = IMG['i_'+td.id+'_'+t2] || IMG['i_'+td.id+'_0'];
+    if(icon) ctx.drawImage(icon, 0, 0, 16, 16, x, y, s, s); // frame 0 = utan vit kontur
+  }
+}
+function drawHUD(){
+  // klocka + dag + väder (träpanel ur paketet)
+  drawPanel(THEME.brown, 8, 8, 252, 60);
+  if(IMG.clock) ctx.drawImage(IMG.clock, 20, 18, 40, 40);
+  const frac = natt ? 1 : klockT/DAG_S;
+  if(IMG.hand){ // paketets urvisare: 8 färdigroterade frames à 32px, medurs från "uppåt"
+    const f8 = Math.floor(frac*8+0.5)%8;
+    ctx.drawImage(IMG.hand, f8*32, 0, 32, 32, 20, 18, 40, 40);
+  }
+  ctx.font='bold 14px monospace'; ctx.textAlign='left'; ctx.fillStyle='#3a2a1a';
+  if(IMG.weather) ctx.drawImage(IMG.weather, 0, 16, 16, 16, 68, 18, 18, 18); // säsongsblomma = vår
+  ctx.fillText(sasong+' · Dag '+dag, 90, 32);
+  const wi = natt ? [1,2] : vader==='regn' ? [3,0] : [0,0]; // måne / regnmoln / sol ur väderarket
+  if(IMG.weather) ctx.drawImage(IMG.weather, wi[0]*16, wi[1]*16, 16, 16, 68, 38, 18, 18);
+  ctx.fillText(natt?'Natt':vader==='regn'?'Regn':'Sol', 90, 52);
+  // pengar (träpanel + myntstapel ur HUD-arket)
+  drawPanel(THEME.brown, VW-160, 8, 152, 42);
+  if(IMG.hud) ctx.drawImage(IMG.hud, 8*16, 5*16, 16, 16, VW-146, 18, 22, 22);
+  ctx.fillStyle='#3a2a1a'; ctx.font='bold 17px monospace';
+  ctx.fillText(coins+' kr', VW-118, 35);
+  // spelarkort (ljusa paneler)
+  players.forEach((p,i)=>{
+    const y = 76+i*70;
+    drawPanel(THEME.beige, 8, y, 206, 64);
+    drawModChar(ctx, p.def, 'idle', 0, Math.floor(time*5)%4, 6, y+4, 1.3, 0); // bondens egen look som markör
+    ctx.font='bold 12px monospace'; ctx.fillStyle='#3a2a1a'; ctx.textAlign='left';
+    ctx.fillText(p.name, 48, y+18);
+    // energimätare ur Bars.png (blixt-baren): tom ram + fylld version klippt efter procent
+    if(IMG.bars){
+      const bx = 116, by = y+6, Z = 2; // 42x9-sprite i 2x = 84x18, bredvid namnet
+      ctx.drawImage(IMG.bars, 147, 101, 42, 9, bx, by, 42*Z, 9*Z);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(bx, by, (2 + 31*(p.energy/100))*Z, 9*Z); ctx.clip();
+      ctx.drawImage(IMG.bars, 3, 101, 42, 9, bx, by, 42*Z, 9*Z);
+      ctx.restore();
+    } else {
+      ctx.fillStyle='#c9b896'; ctx.fillRect(116, y+10, 84, 7);
+      ctx.fillStyle='#6a9c4a'; ctx.fillRect(117, y+11, 82*(p.energy/100), 5);
+    }
+    toolIconDraw(p.tool, 48, y+31, 14, p.tier);
+    ctx.font='11px monospace'; ctx.fillStyle='#6a5a42';
+    const td = TOOLDEF[p.tool];
+    const seedInfo = td.seed ? ' ×'+p.seeds[td.seed] : (p.tier[td.id] ? ' (koppar)' : '');
+    const carryN = Object.values(p.carry).reduce((a,b)=>a+b,0);
+    ctx.fillText(td.namn+seedInfo+' · bär: '+carryN, 66, y+41);
+    // materialrad med paketets ikoner: stock/sten/malm/tacka + slem
+    const matIcons = [
+      [IMG.iconsWood, 0, 0, 'wood'], [IMG.iconsStones, 0, 0, 'stone'],
+      [IMG.iconsBars, 16, 0, 'ore'], [IMG.iconsBars, 0, 0, 'ingot']
+    ];
+    let mx = 12;
+    ctx.font='bold 10px monospace';
+    for(const [img2, sx2, sy2, key] of matIcons){
+      if(img2) ctx.drawImage(img2, sx2, sy2, 16, 16, mx, y+45, 14, 14);
+      ctx.fillStyle='#4a3826'; ctx.fillText(p.mats[key], mx+16, y+56);
+      mx += 40;
+    }
+    ctx.fillStyle='#3b7ea0'; ctx.fillText('slem '+p.mats.goo, mx, y+56);
+  });
+  // verktygsrad = paketets inventory-bricka (Slots.png: mörk bricka + slotrutor à 18px)
+  const p0 = players[0];
+  if(p0 && IMG.slots){
+    const Z = 2, tw = 164*Z, hx = VW/2 - tw/2, hy = VH - 28*Z - 8;
+    ctx.drawImage(IMG.slots, 6, 105, 164, 28, hx, hy, tw, 28*Z);
+    for(let i=0;i<9;i++){
+      const x = hx + (2+18*i)*Z, y = hy + 5*Z;
+      ctx.drawImage(IMG.slots, i===p0.tool?182:151, 6, 18, 18, x, y, 18*Z, 18*Z);
+      if(i<TOOLDEF.length){
+        toolIconDraw(i, x+6, y+6, 24, p0.tier);
+        ctx.font='9px monospace'; ctx.textAlign='left'; ctx.fillStyle='#e8d6b8';
+        ctx.fillText(i+1, x+3, y+11);
+        if(TOOLDEF[i].seed){
+          ctx.font='bold 10px monospace'; ctx.textAlign='right'; ctx.fillStyle='#f2ead6';
+          ctx.fillText(p0.seeds[TOOLDEF[i].seed], x+33, y+33);
+        }
+      }
+    }
+    ctx.textAlign='left';
+  }
+  if(NET.open){
+    ctx.font='bold 11px monospace'; ctx.textAlign='right'; ctx.fillStyle='#e8c96a';
+    ctx.fillText('Mobil-kod: '+NET.code.toUpperCase(), VW-10, VH-10);
+    ctx.textAlign='left';
+  }
+}
+function drawPauseMenu(){
+  ctx.fillStyle='rgba(14,20,10,0.6)'; ctx.fillRect(0,0,VW,VH);
+  drawPanel(THEME.beige, VW/2-340, 40, 680, 460);
+  drawWideBtn(VW/2-220, 62, 440, 42);
+  ctx.textAlign='center';
+  ctx.font='bold 22px monospace'; ctx.fillStyle='#3a2a1a';
+  ctx.fillText('PAUS — PALSSONS GÅRD', VW/2, 91);
+  ctx.font='14px monospace'; ctx.fillStyle='#4a3826';
+  const lines = [
+    'Dag '+dag+' · '+coins+' kr i kassan',
+    '',
+    'STYRNING: WASD/pilar = gå · Blanksteg/Enter = använd verktyg',
+    'E/Hö.Shift = byt verktyg · 1–5 = välj direkt · T = sova',
+    'Mobil: styrspak + ANVÄND + VERKTYG',
+    '',
+    'SÅ FUNKAR DET: Hacka jorden på fältet → så frön → vattna',
+    '→ grödan växer I REALTID när jorden är våt → skörda',
+    '→ bär till SÄLJ-kistan → pengar direkt!',
+    '',
+    'Regndagar vattnar allt gratis. Natten pausar allt (Trygg natt).',
+    '',
+    'P / Escape / I — fortsätt spela'
+  ];
+  lines.forEach((l,i)=>ctx.fillText(l, VW/2, 150+i*24));
+}
+function drawCloud(x, y, s){
+  ctx.fillStyle = '#ffffff';
+  const b = (bx,by,bw,bh)=>{ ctx.fillRect(Math.round(x+bx*s), Math.round(y+by*s), Math.round(bw*s), Math.round(bh*s)); };
+  b(0,2,10,3); b(2,0,4,2); b(6,1,3,1);
+  ctx.fillStyle = '#dceaf2';
+  b(0,4,10,1);
+}
+function drawTitle(){
+  drawPanel(THEME.brown, VW/2-260, 34, 520, 152); // träskylt ur paketet bakom titeln
+  ctx.textAlign='center';
+  const t1 = 'PALSSONS', t2 = 'GÅRD';
+  ctx.font='bold 58px monospace';
+  // tjock mörk kontur
+  ctx.fillStyle='#3a2a1a';
+  for(const [ox2,oy2] of [[-3,0],[3,0],[0,-3],[0,3],[-2,-2],[2,2],[-2,2],[2,-2]]){
+    ctx.fillText(t1, VW/2+ox2, 105+oy2);
+    ctx.fillText(t2, VW/2+ox2, 163+oy2);
+  }
+  ctx.fillStyle='#7fd44f'; ctx.fillText(t1, VW/2, 105);
+  ctx.fillStyle='#5cb838'; ctx.fillText(t1, VW/2, 108);
+  ctx.fillStyle='#f5b33c'; ctx.fillText(t2, VW/2, 163);
+  ctx.fillStyle='#e08a24'; ctx.fillText(t2, VW/2, 166);
+  // dekor: morot + jordgubbe vid titeln (varuikoner ur grödarken)
+  if(IMG.carrot) ctx.drawImage(IMG.carrot, 7*16,0,16,16, VW/2-238, 66, 40, 40);
+  if(IMG.straw) ctx.drawImage(IMG.straw, 7*16,0,16,16, VW/2+198, 122, 40, 40);
+}
+function drawSelect(){
+  // pixlad vårmiljö byggd av paketets egna tiles i stället för egenritad himmel
+  ctx.fillStyle = grassBase; ctx.fillRect(0, 0, VW, VH);
+  for(let ty=0; ty*TS<VH+TS; ty++) for(let tx=0; tx*TS<VW+TS; tx++){
+    const dx=tx*TS, dy=ty*TS;
+    if(plainGrass) ctx.drawImage(plainGrass, 0, 0, 16, 16, dx, dy, TS, TS);
+    const hsh = ((tx*2654435761) ^ (ty*40503)) >>> 0;
+    if(hsh%100 < 7){ const g = GRASS_DECOR[hsh%GRASS_DECOR.length]; drawTile(IMG.grass, g[0], g[1], dx, dy); }
+  }
+  if(IMG.fence) for(let x=0; x<VW; x+=TS) ctx.drawImage(IMG.fence, 4*16, 0, 16, 16, x, 2, TS, TS);
+  // liten gårdsvärld: huset, ett moget fält med säljkista, träd i hörnen — allt ur paketet
+  if(IMG.house) ctx.drawImage(IMG.house, 0, 0, 128, 112, 22, 16, 192, 168);
+  if(IMG.soil){
+    const crops = ['carrot','straw','potato'];
+    for(let j=0;j<2;j++) for(let i=0;i<3;i++){
+      const dx = 716+i*TS, dy = 74+j*TS;
+      drawTile(soilProc||IMG.soil, 0, 3, dx, dy);
+      const cid = crops[(i+j)%3], cimg = IMG[cid];
+      if(cimg){
+        const an = (CROP_ANCHOR[cid]||[])[STAGES] || {ax:0, ay:-6};
+        ctx.drawImage(cimg, STAGES*16, 0, 16, 16, dx+an.ax, dy+an.ay, TS, TS);
+      }
+    }
+  }
+  if(IMG.chest) ctx.drawImage(IMG.chest, 8, 0, 16, 16, 856, 78, 56, 56);
+  if(IMG.tree) for(const [bx,by] of [[46,VH-10],[914,VH-10],[976,190]])
+    ctx.drawImage(IMG.tree, 0, 48, 32, 48, bx-32, by-96, 64, 96);
+  drawTitle();
+  // bondekort på paneler ur paketet — inga namn, bygg din egen!
+  const cw=150, gap=14, total=5*cw+4*gap, sx0=(VW-total)/2;
+  for(let i=0;i<5;i++){
+    const x = sx0+i*(cw+gap), y = 210, h = 170;
+    const agare = joiners.find(j=>j.ci===i);
+    drawPanel(agare ? THEME.orange : THEME.beige, x, y, cw, h);
+    const def = agare ? agare.def : PRESETS[i];
+    const fi = Math.floor(time*5)%4;
+    drawModChar(ctx, def, 'idle', 0, fi, x+cw/2-48, y+14, 3, 0);
+    if(agare){
+      const pi = joiners.indexOf(agare);
+      ctx.font='bold 12px monospace'; ctx.textAlign='center'; ctx.fillStyle=CHARCOLS[agare.ci];
+      const status = agare.step==='build' ? 'byggs…' : agare.step==='name' ? 'skriver namn…' : agare.ready ? '✓ REDO' : '';
+      ctx.fillText('Spelare '+(pi+1)+' '+status, x+cw/2, y+h+16);
+      if(agare.step==='build'){
+        // byggpanel på kortets nederdel — förhandsvisningen syns ovanför och uppdateras live
+        drawPanel(THEME.beige, x-16, y+56, cw+32, 130);
+        ctx.textAlign='left';
+        BUILDROWS.forEach((r,ri)=>{
+          const ry = y+78+ri*20;
+          if(ri===agare.row){ drawWideBtn(x-8, ry-13, cw+16, 19); }
+          ctx.font='bold 11px monospace'; ctx.fillStyle='#3a2a1a';
+          ctx.fillText(r.namn, x-4, ry);
+          ctx.textAlign='right';
+          ctx.fillText('‹'+r.visa(agare.def)+'›', x+cw+4, ry);
+          ctx.textAlign='left';
+        });
+        ctx.font='9px monospace'; ctx.fillStyle='#6a5a42'; ctx.textAlign='center';
+        ctx.fillText('upp/ner: rad · vä/hö: ändra · ANVÄND: klar', x+cw/2, y+180);
+      } else if(agare.step==='name' && (agare.ctrlId==='k0'||agare.ctrlId==='k1')){
+        drawPanel(THEME.beige, x-14, y+30, cw+28, 66);
+        ctx.font='bold 12px monospace'; ctx.textAlign='center'; ctx.fillStyle='#3a2a1a';
+        ctx.fillText('Skriv ditt namn:', x+cw/2, y+50);
+        drawWideBtn(x-4, y+58, cw+8, 24);
+        const blink = (time*2|0)%2===0 ? '_' : ' ';
+        ctx.fillText((agare.name||'')+blink, x+cw/2, y+75);
+        ctx.font='9px monospace'; ctx.fillStyle='#6a5a42';
+        ctx.fillText('(tomt = Bonde #'+(joiners.indexOf(agare)+1)+') · ANVÄND = klar', x+cw/2, y+91);
+      } else if(agare.step==='name'){
+        ctx.font='11px monospace'; ctx.fillStyle='#3a2a1a';
+        ctx.fillText('(skriver på mobilen…)', x+cw/2, y+h+32);
+      }
+    }
+  }
+  // prompt på träknapp
+  const allReady = joiners.length>0 && joiners.every(j=>j.ready);
+  drawWideBtn(VW/2-190, 428, 380, 36);
+  ctx.font='bold 15px monospace'; ctx.textAlign='center'; ctx.fillStyle='#3a2a1a';
+  if(allReady) ctx.fillText('Startar om '+Math.ceil(selCount)+'…', VW/2, 452);
+  else ctx.fillText('Tryck ANVÄND / Blanksteg för att gå med!', VW/2, 452);
+  if(savedInfo && (savedInfo.v===2||savedInfo.v===3)){
+    ctx.font='bold 12px monospace'; ctx.fillStyle='#f2ead6';
+    ctx.fillText('Sparad gård finns (dag '+(savedInfo.dag||1)+') — fortsätter automatiskt · N = börja om', VW/2, 480);
+  }
+  if(NET.open){
+    ctx.font='bold 13px monospace'; ctx.fillStyle='#1f4d2a';
+    ctx.fillText('Mobil: skanna QR-koden eller öppna '+joinLink().replace('http://',''), VW/2, VH-46);
+  }
+  ctx.font='11px monospace'; ctx.fillStyle='#2a5c34';
+  ctx.fillText('Vä/hö: byt bonde · VERKTYG (E/Hö.Shift): bygg egen · ANVÄND: vidare → skriv namn · Grafik: Farm RPG av EmanuelleDev', VW/2, VH-16);
+}
+
+// ===================== DEBUG-HOOKS =====================
+window.__DBG = ()=>({ state, players:players.length, joiners:joiners.length, dag, coins, natt,
+  px:players[0]?Math.round(players[0].x):null, py:players[0]?Math.round(players[0].y):null,
+  dir:players[0]?players[0].dir:null, anim:players[0]?players[0].anim:null, facing:players[0]?facingTile(players[0]):null,
+  tool:players[0]?players[0].tool:null, carry:players[0]?players[0].carry:null, energy:players[0]?Math.round(players[0].energy):null });
+window.__NET = NET;
+window.__TP = (tx,ty)=>{ players.forEach((p,i)=>{ p.x=tx*TS+i*24; p.y=ty*TS; }); camSnap=true; };
+window.__TILE = (tx,ty)=>{ const t=map[ty*MW+tx]; return t ? {kind:t.kind, soil:t.soil?{wet:t.soil.wet, crop:t.soil.crop}:null} : null; };
+window.__FASTGROW = ()=>{ for(const t of map) if(t.soil&&t.soil.crop){ t.soil.crop.stage=STAGES; } };
+window.__GIVETIME = s=>{ klockT += s; };
+window.__PG = ()=>plainGrass ? plainGrass.toDataURL() : null;
+window.__DECOR = ()=>{ let n=0; for(let ty=0;ty<MH;ty++) for(let tx=0;tx<MW;tx++){ const h=((tx*2654435761)^(ty*40503))>>>0; if(h%100<7) n++; } return n/(MW*MH); };
+window.__START = ()=>{ if(state==='play') return 'already'; joiners = [{ctrlId:'k0', ci:0, ready:true, fresh:false}]; startGame(); return 'ok'; };
+window.__GIVE = (k,n)=>{ if(players[0]) players[0].mats[k] = (players[0].mats[k]||0)+n; return players[0]?players[0].mats:null; };
+window.__GIVECROP = (id,n)=>{ if(players[0]){ players[0].carry[id] = (players[0].carry[id]||0)+n; players[0].lastCrop = id; } };
+window.__CRATES = ()=>({ ...crateCount });
+window.__P0 = ()=>players[0] ? { mats:{...players[0].mats}, tier:{...players[0].tier}, tool:players[0].tool } : null;
+window.__FORGE = forge;
+window.__SLIMES = ()=>slimes.map(s=>({x:Math.round(s.x), y:Math.round(s.y), hp:s.hp, dead:s.deadT>0}));
+window.__SPAWNSLIME = (tx,ty)=>{ slimes.push({x:tx*TS+16, y:ty*TS+16, hp:2, dir:0, animT:0, hurtT:0, deadT:0, vx:0, vy:0, mal:null, malT:0}); return slimes.length; };
+window.__TREES = ()=>trees.map(t=>({tx:t.tx, ty:t.ty, hp:t.hp, stump:t.stump}));
+window.__NODES = ()=>nodes.map(n=>({tx:n.tx, ty:n.ty, type:n.type, hp:n.hp, brutet:n.brutet}));
+window.__MANIFEST = ()=>Object.values(MANIFEST);
+window.__FARM = (tx,ty,what)=>{ const t=map[ty*MW+tx]; if(!t) return 'no tile';
+  if(what==='hoe'){ t.kind=4; t.soil={wet:false,wetT:0,crop:null}; }
+  else if(what==='water'){ if(t.soil){ t.soil.wet=true; t.soil.wetT=90; } }
+  else if(t.soil){ t.soil.crop={id:what, stage:0, prog:0}; }
+  return 'ok'; };
+
+// ===================== BOOT =====================
+let lastT = performance.now();
+function frame(now){
+  const dt = Math.min(0.05, (now-lastT)/1000);
+  lastT = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+loadAssets().then(()=>{
+  if(MODE==='ctrl'){ startCtrl(URLQ.get('room')); return; }
+  if(MODE==='choose'){
+    const ui = document.getElementById('chooseUI');
+    ui.style.display='flex';
+    const onTap=(el,fn)=>{ let last=0; const h=()=>{ const n=performance.now(); if(n-last<400) return; last=n; fn(); }; el.addEventListener('pointerup',h); el.addEventListener('click',h); };
+    onTap(document.getElementById('chJoin'), ()=>{ document.getElementById('chJoin').style.display='none'; document.getElementById('codeRow').style.display='flex'; document.getElementById('codeInput').focus(); });
+    const go=()=>{ const code=document.getElementById('codeInput').value.trim(); if(code.length===4) startCtrl(code); };
+    onTap(document.getElementById('chGo'), go);
+    document.getElementById('codeInput').addEventListener('keydown', e=>{ if(e.key==='Enter') go(); });
+    let started=false;
+    onTap(document.getElementById('chHost'), ()=>{
+      if(started) return; started=true;
+      ui.style.display='none';
+      startHost(); enableLocalPad();
+      lastT=performance.now(); requestAnimationFrame(frame);
+    });
+    return;
+  }
+  startHost();
+  if(IS_TOUCH && Math.min(innerWidth,innerHeight)<900) enableLocalPad();
+  requestAnimationFrame(frame);
+});
+</script>
