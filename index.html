@@ -802,7 +802,7 @@ function scanForJoiners(){
     if(used.has(id)) continue;
     if(C(id).aJP && players.length+joiners.length<5){
       const ci = (players.length+joiners.length)%5;
-      const j = { ctrlId:id, ci, def:{...PRESETS[ci]}, step:'build', row:5, name:'', ready:false, fresh:true, nmSkickad:false };
+      const j = { ctrlId:id, ci, def:{...PRESETS[ci]}, step:'build', row:0, name:'', ready:false, fresh:true, nmSkickad:false };
       preloadDef(j.def);
       joiners.push(j);
     }
