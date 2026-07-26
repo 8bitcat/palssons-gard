@@ -224,6 +224,7 @@ function loadAssets(){
     plainGrass = buildCleanTile(IMG.grass, 6, 2);
     pathProc = buildPathSheet();
     buildFurrowTiles();
+    waterProc = buildWaterSheet();
     const gp = plainGrass.getContext('2d').getImageData(8,8,1,1).data;
     grassBase = 'rgb('+gp[0]+','+gp[1]+','+gp[2]+')'; // basfärg under tiles med transparenshål
     soilProc = buildSoilSheet();
@@ -367,6 +368,58 @@ function buildFurrowTiles(){
     return c;
   };
   farTiles = { torr:[mk(11,false), mk(23,false), mk(37,false)], vat:[mk(11,true), mk(23,true), mk(37,true)] };
+}
+// vattenbitarnas animationsframes har sandvirvlar inbakade i det öppna vattnet —
+// tvätta ALLA 16 mask-bitar × 4 frames: strand mot stängda sidor bevaras (flood-frans),
+// icke-blått ute i vattnet ersätts med basblå. Atlas per frame, mask → (m%4, m>>2).
+let waterProc = null;
+function buildWaterSheet(){
+  const img = IMG.wg; if(!img) return null;
+  const ut = [];
+  const tmp = document.createElement('canvas'); tmp.width = 16; tmp.height = 16;
+  const tg = tmp.getContext('2d');
+  for(let f=0; f<4; f++){
+    const atlas = document.createElement('canvas'); atlas.width = 64; atlas.height = 64;
+    const ag = atlas.getContext('2d');
+    // basblå = dominanta färgen i interiörbiten denna frame
+    tg.clearRect(0,0,16,16);
+    tg.drawImage(img, 17*16, (1+f*4)*16, 16, 16, 0, 0, 16, 16);
+    let d = tg.getImageData(0,0,16,16).data;
+    const tally = {};
+    for(let i=0;i<d.length;i+=4){ if(d[i]<=d[i+2]-12) { const k=d[i]+','+d[i+1]+','+d[i+2]; tally[k]=(tally[k]||0)+1; } }
+    const alla = Object.entries(tally).sort((a,b)=>b[1]-a[1]);
+    const bas = alla.length ? alla[0][0].split(',').map(Number) : [40,120,220];
+    for(let m=0; m<16; m++){
+      const st = m===15 ? [5,1] : SOIL_LUT[m];
+      tg.clearRect(0,0,16,16);
+      tg.drawImage(img, (st[0]+12)*16, (st[1]+f*4)*16, 16, 16, 0, 0, 16, 16);
+      const id = tg.getImageData(0,0,16,16); d = id.data;
+      const dekor = i => d[i*4+3]>=200 && d[i*4] > d[i*4+2]-12; // icke-blått
+      const stangd = i => { const x=i%16, y=(i/16)|0;
+        return Math.min(!(m&1)?y:99, !(m&2)?15-x:99, !(m&4)?15-y:99, !(m&8)?x:99); };
+      const sedd = new Uint8Array(256);
+      for(let i=0;i<256;i++){
+        if(sedd[i] || !dekor(i)) continue;
+        const region = [], ko = [i]; sedd[i] = 1; let strand = false;
+        while(ko.length){
+          const p2 = ko.pop(); region.push(p2);
+          if(stangd(p2)<=1) strand = true;
+          const x = p2%16, y = (p2/16)|0;
+          for(const [nx,ny] of [[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){
+            if(nx<0||ny<0||nx>15||ny>15) continue;
+            const q = ny*16+nx;
+            if(!sedd[q] && dekor(q)){ sedd[q] = 1; ko.push(q); }
+          }
+        }
+        for(const p2 of region)
+          if(!strand || stangd(p2)>8){ d[p2*4]=bas[0]; d[p2*4+1]=bas[1]; d[p2*4+2]=bas[2]; d[p2*4+3]=255; }
+      }
+      tg.putImageData(id, 0, 0);
+      ag.drawImage(tmp, (m%4)*16, (m>>2)*16);
+    }
+    ut.push(atlas);
+  }
+  return ut;
 }
 // vägbitarna (rad 12–15) har grästuv-cirklar inbakade vid tile-korsen — tvätta fram rena bitar.
 // grönt som inte hänger ihop med kantfransen (sidorna mot gräs) ersätts med vägens basfärg.
@@ -1277,7 +1330,7 @@ function useTool(p){
       const g2 = (tx+gx)>=0&&(ty+gy)>=0&&(tx+gx)<MW&&(ty+gy)<MH ? map[(ty+gy)*MW+(tx+gx)] : null;
       return g2 && (g2.kind===2 || g2.kind===5);
     });
-    if(t.kind===0 && inField && !t.soil){
+    if((t.kind===0 || t.kind===1) && inField && !t.soil){ // gräs OCH jordväg går att gräva upp
       startAct(p,'shovel',()=>{ t.kind=4; t.soil={wet:false,wetT:0,crop:null,farad:false}; p.energy=Math.max(0,p.energy-kost(3)); burst(tx*TS+16,ty*TS+16,'#a06a3a',6); });
     }
     else if(t.kind===4 && t.soil && !t.soil.crop && grannVatten){
@@ -1639,9 +1692,15 @@ function update(dt){
 
   // grödor växer i realtid — bara på dagen (Trygg natt)
   if(!natt){
-    for(const t of map){
+    for(let mi=0; mi<map.length; mi++){
+      const t = map[mi];
       if(!t.soil) continue;
       if(vader==='regn') { t.soil.wet = true; t.soil.wetT = 90; }
+      else { // intill vatten = ständigt bevattnad — framgrävda kanaler funkar som bevattning!
+        const mx = mi%MW, my = (mi/MW)|0;
+        const gr = (x,y)=> x>=0&&y>=0&&x<MW&&y<MH && (map[y*MW+x].kind===2||map[y*MW+x].kind===5);
+        if(gr(mx-1,my)||gr(mx+1,my)||gr(mx,my-1)||gr(mx,my+1)){ t.soil.wet = true; t.soil.wetT = 90; }
+      }
       if(t.soil.wet){
         t.soil.wetT -= dt;
         if(t.soil.wetT<=0) t.soil.wet = false;
@@ -1799,8 +1858,11 @@ function draw(){
       const hsh = ((tx*2654435761) ^ (ty*40503)) >>> 0;
       if(t.kind===2 || t.kind===5){ // 5 = vatten under bro (gångbart, ser likadant ut)
         if(IMG.wg){
-          const st = waterPiece(tx, ty);
-          drawTile(IMG.wg, st[0]+12, st[1] + ((time*5|0)%4)*4, dx, dy);
+          const hv = (x,y)=> x>=0 && y>=0 && x<MW && y<MH && (map[y*MW+x].kind===2 || map[y*MW+x].kind===5);
+          const m = (hv(tx,ty-1)?1:0)|(hv(tx+1,ty)?2:0)|(hv(tx,ty+1)?4:0)|(hv(tx-1,ty)?8:0);
+          if(waterProc) // tvättade bitar utan sandvirvlar i öppet vatten
+            ctx.drawImage(waterProc[(time*5|0)%4], (m%4)*16, (m>>2)*16, 16, 16, dx, dy, TS, TS);
+          else { const st = waterPiece(tx, ty); drawTile(IMG.wg, st[0]+12, st[1] + ((time*5|0)%4)*4, dx, dy); }
         } else ctx.drawImage(IMG.water, 0,0,16,16, dx,dy,TS,TS);
       } else {
         if(plainGrass) ctx.drawImage(plainGrass, 0, 0, 16, 16, dx, dy, TS, TS);
