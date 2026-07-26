@@ -223,6 +223,7 @@ function loadAssets(){
   return Promise.all(jobs).then(()=>{
     plainGrass = buildCleanTile(IMG.grass, 6, 2);
     pathProc = buildPathSheet();
+    buildFurrowTiles();
     const gp = plainGrass.getContext('2d').getImageData(8,8,1,1).data;
     grassBase = 'rgb('+gp[0]+','+gp[1]+','+gp[2]+')'; // basfärg under tiles med transparenshål
     soilProc = buildSoilSheet();
@@ -341,6 +342,31 @@ function buildCleanTile(img, tx, ty){
   }
   g.putImageData(id, 0, 0);
   return c;
+}
+// fåror: förrenderade 16px-overlays med hack, färgskiftningar och uppkastade ljusa kanter.
+// samma frö för torr/våt variant → spåren ligger kvar på samma plats när man vattnar.
+let farTiles = null;
+function buildFurrowTiles(){
+  const mk = (seed, wet)=>{
+    const c = document.createElement('canvas'); c.width = 16; c.height = 16;
+    const g = c.getContext('2d');
+    const rng = mulberry32(seed);
+    const mork = wet ? '#41220e' : '#63351a';
+    const djup = wet ? '#2e1607' : '#4a250e';
+    const ljus = wet ? '#75482a' : '#b06f3e';
+    for(let sp=0; sp<3; sp++){
+      const bas = 3 + sp*5, fas = rng()*6.28;
+      for(let x=1; x<15; x++){
+        if(rng()<0.10) continue; // små avbrott i spåret
+        const y = bas + Math.round(Math.sin(x*0.55+fas)*0.9 + (rng()-0.5)*0.8);
+        g.fillStyle = mork; g.fillRect(x, y, 1, 1);
+        if(rng()<0.45){ g.fillStyle = djup; g.fillRect(x, y+1, 1, 1); }
+        if(rng()<0.35){ g.fillStyle = ljus; g.fillRect(x, y-1, 1, 1); }
+      }
+    }
+    return c;
+  };
+  farTiles = { torr:[mk(11,false), mk(23,false), mk(37,false)], vat:[mk(11,true), mk(23,true), mk(37,true)] };
 }
 // vägbitarna (rad 12–15) har grästuv-cirklar inbakade vid tile-korsen — tvätta fram rena bitar.
 // grönt som inte hänger ihop med kantfransen (sidorna mot gräs) ersätts med vägens basfärg.
@@ -866,8 +892,8 @@ function pushStatus(){
       const p = players.find(q=>q.ctrlId===id);
       if(p){
         const td = TOOLDEF[p.tool];
-        const icp = td.seed ? MANIFEST[td.seed] : MANIFEST['i_'+td.id+'_'+(p.tier[td.id]||0)];
-        msg = { t:'you', st:'play', cls:p.name, color:p.col, en:Math.round(p.energy), tool:td.namn, icp, fr: td.seed?7:0,
+        const icp = td.seed ? MANIFEST[td.seed] : MANIFEST['i_'+td.id+'_0']; // alltid basikonen
+        msg = { t:'you', st:'play', cls:p.name, color:p.col, en:Math.round(p.energy), tool:td.namn, icp, fr: td.seed?(CROPS[td.seed].ikon??7):0,
                 wt: td.id==='can' ? p.water/maxWater(p) : null, wn: td.id==='can' ? p.water : null };
       }
     }
@@ -1797,11 +1823,9 @@ function draw(){
         const st = soilAutoTile(tx, ty);
         drawTile(soilProc||IMG.soil, st[0], st[1], dx, dy);
         if(t.soil.wet) drawTile(IMG.soil, st[0]+12, st[1], dx, dy);
-        if(t.soil.farad){ // fåror = såbar — tre mörka spår (arket saknar fårbitar, ritas proceduralt)
-          ctx.fillStyle = t.soil.wet ? 'rgba(34,18,8,0.5)' : 'rgba(112,64,30,0.6)';
-          ctx.fillRect(dx+3, dy+6, TS-6, 3);
-          ctx.fillRect(dx+3, dy+14, TS-6, 3);
-          ctx.fillRect(dx+3, dy+22, TS-6, 3);
+        if(t.soil.farad && farTiles){ // fåror = såbar — variant väljs per tile så mönstret inte upprepas
+          const v = farTiles[t.soil.wet ? 'vat' : 'torr'][hsh%3];
+          ctx.drawImage(v, 0, 0, 16, 16, dx, dy, TS, TS);
         }
         const cr = t.soil.crop;
         if(cr && IMG[cr.id]){
@@ -2099,8 +2123,8 @@ function toolIconDraw(ti, x, y, s, tiers){
   if(td.seed){
     if(IMG[td.seed]) ctx.drawImage(IMG[td.seed], cropIcon(td.seed), 0, 16, 16, x, y, s, s);
   } else {
-    const t2 = tiers ? tiers[td.id] : 0;
-    const icon = IMG['i_'+td.id+'_'+t2] || IMG['i_'+td.id+'_0'];
+    // alltid BAS-verktygets ikon (trä) — metallnivån syns i handen/kortet, inte i ikonerna
+    const icon = IMG['i_'+td.id+'_0'];
     if(icon) ctx.drawImage(icon, 0, 0, 16, 16, x, y, s, s); // frame 0 = utan vit kontur
   }
 }
