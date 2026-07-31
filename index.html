@@ -2880,7 +2880,7 @@ function draw(){
     } else drawPlayer(a.p, ox, oy);
   }
   if(caveLevel>0 || (subAktiv && subAktiv.mork)) drawCaveDark(ox, oy); // gruvmörkret med ljusglober (även mörka authored underjordar)
-  if(subAktiv && subAktiv.exit){ // UT-skylten i authored rum/underjordar — alltid synlig ovanpå mörkret
+  if(subAktiv && subAktiv.exit && (!subAktiv.mork || players.some(pl=>dist(pl.x, pl.y, subAktiv.exit.tx*TS+16, subAktiv.exit.ty*TS+16) < 170))){ // UT-skylten: alltid i ljusa rum, i mörka först när ens ljus når fram
     const ex = subAktiv.exit.tx*TS-ox, ey = subAktiv.exit.ty*TS-oy;
     ctx.fillStyle='rgba(20,14,8,0.72)'; ctx.fillRect(ex-4, ey-22, 40, 18);
     ctx.font='bold 12px monospace'; ctx.textAlign='center';
@@ -3126,34 +3126,16 @@ let darkCv = null;
 function drawCaveDark(ox, oy){
   if(!darkCv || darkCv.width!==VW || darkCv.height!==VH){ darkCv = document.createElement('canvas'); darkCv.width = VW; darkCv.height = VH; }
   const g2 = darkCv.getContext('2d');
-  g2.clearRect(0, 0, VW, VH);
-  // helsvart utanför grottregionen (ytan ovanför / husrummen nedanför får inte skymta)
-  const topp = CAVE_Y0*TS-oy, botten = (CAVE_Y1+1)*TS-oy;
+  // KOLSVART överallt — det enda ljuset är spelarnas egna glober (stegar/utgångar hittar man genom att utforska)
+  g2.globalCompositeOperation = 'source-over';
   g2.fillStyle = '#060409';
-  if(topp > 0) g2.fillRect(0, 0, VW, topp);
-  if(botten < VH) g2.fillRect(0, botten, VW, VH-botten);
-  g2.fillStyle = 'rgba(6,5,10,0.93)';
-  g2.fillRect(0, Math.max(0,topp), VW, Math.min(VH,botten)-Math.max(0,topp));
+  g2.fillRect(0, 0, VW, VH);
   g2.globalCompositeOperation = 'destination-out';
   for(const p of players){
     const g = g2.createRadialGradient(p.x-ox, p.y-oy, 34, p.x-ox, p.y-oy, 150); // generös glob: spelaren + en bit runtomkring fullt synlig
     g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
     g2.fillStyle = g;
     g2.fillRect(p.x-ox-150, p.y-oy-150, 300, 300);
-  }
-  // utgångar/stegar och handlaren lyser också (i authored rum: rummets egen utgång, inte gamla grott-stegar)
-  const punkter = [];
-  if(subAktiv){ if(subAktiv.exit) punkter.push([subAktiv.exit.tx*TS+16, subAktiv.exit.ty*TS+16]); }
-  else {
-    if(caveExit) punkter.push([caveExit.tx*TS+16, caveExit.ty*TS+16]);
-    if(caveDown) punkter.push([caveDown.tx*TS+16, caveDown.ty*TS+16]);
-    for(const s of shops) if(s.merch) punkter.push([(s.tx+1)*TS, (s.ty+1)*TS]);
-  }
-  for(const [lx,ly] of punkter){
-    const g = g2.createRadialGradient(lx-ox, ly-oy, 10, lx-ox, ly-oy, 80);
-    g.addColorStop(0, 'rgba(0,0,0,0.95)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    g2.fillStyle = g;
-    g2.fillRect(lx-ox-80, ly-oy-80, 160, 160);
   }
   g2.globalCompositeOperation = 'source-over';
   ctx.drawImage(darkCv, 0, 0);
