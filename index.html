@@ -1694,7 +1694,7 @@ function useTool(p){
   if(pty>=RY0-1 && pty<=RY1 && ptx>=19 && ptx<=22){ kokOpen = { pid:p.id, sel:0 }; return; }
   // authored sub-area (hus-interiör/underjord): ut via exit-tile · in via stege-portal
   if(subAktiv){
-    if(subAktiv.exit && dist(p.x, p.y, subAktiv.exit.tx*TS+16, subAktiv.exit.ty*TS+16) < 48){ exitSub(); return; }
+    if(subAktiv.exit && dist(p.x, p.y, subAktiv.exit.tx*TS+16, subAktiv.exit.ty*TS+16) < 64){ exitSub(); return; }
   } else if(caveLevel===0){
     for(const key in stegeSub){ const [sx,sy] = key.split(',').map(Number);
       if(dist(p.x, p.y, sx*TS+16, sy*TS+16) < 52){ if(enterSub(stegeSub[key], sx, sy)) return; } }
@@ -1702,11 +1702,11 @@ function useTool(p){
   // gruvan: ingången på ytan / stegarna där nere
   if(caveEntrance && caveLevel===0 && !subAktiv && dist(p.x, p.y, caveEntrance.tx*TS+16, caveEntrance.ty*TS+16) < 52){ enterCave(1); return; }
   if(caveLevel>0){
-    if(dist(p.x, p.y, caveExit.tx*TS+16, caveExit.ty*TS+16) < 48){
+    if(dist(p.x, p.y, caveExit.tx*TS+16, caveExit.ty*TS+16) < 64){
       if(caveLevel===1){ lamnaCave(); } else { enterCave(caveLevel-1); }
       return;
     }
-    if(caveDown && dist(p.x, p.y, caveDown.tx*TS+16, caveDown.ty*TS+16) < 48){ enterCave(caveLevel+1); return; }
+    if(caveDown && dist(p.x, p.y, caveDown.tx*TS+16, caveDown.ty*TS+16) < 64){ enterCave(caveLevel+1); return; }
   }
   // lådorna: bär du något som MATCHAR en låda inom räckhåll väljs den — annars närmaste
   let valdLada = null, bd = 46;
@@ -2880,6 +2880,13 @@ function draw(){
     } else drawPlayer(a.p, ox, oy);
   }
   if(caveLevel>0 || (subAktiv && subAktiv.mork)) drawCaveDark(ox, oy); // gruvmörkret med ljusglober (även mörka authored underjordar)
+  if(subAktiv && subAktiv.exit){ // UT-skylten i authored rum/underjordar — alltid synlig ovanpå mörkret
+    const ex = subAktiv.exit.tx*TS-ox, ey = subAktiv.exit.ty*TS-oy;
+    ctx.fillStyle='rgba(20,14,8,0.72)'; ctx.fillRect(ex-4, ey-22, 40, 18);
+    ctx.font='bold 12px monospace'; ctx.textAlign='center';
+    ctx.fillStyle='#ffd678'; ctx.fillText('UT', ex+16, ey-8);
+    ctx.fillText('▼', ex+16, ey-26+Math.sin(time*4)*3);
+  }
   // partiklar & text
   for(const pt of parts){
     ctx.globalAlpha = clamp(pt.ttl/pt.max,0,1);
@@ -2894,14 +2901,14 @@ function draw(){
     ctx.fillStyle=t.col; ctx.fillText(t.txt, t.x-ox, t.y-oy);
   }
   ctx.globalAlpha = 1;
-  // skymning/natt
+  // skymning/natt — men INTE under jord (grottan/mörka rum har eget mörker; tinten fyllde igen ljusgloberna)
+  const underjord = caveLevel>0 || !!subAktiv;
   const dagKvar = DAG_S - klockT;
-  if(!natt && dagKvar < 60){
+  if(!natt && dagKvar < 60 && !underjord){
     ctx.fillStyle = 'rgba(20,16,60,'+(0.45*(1-dagKvar/60)).toFixed(2)+')';
     ctx.fillRect(0,0,VW,VH);
   } else if(natt){
-    ctx.fillStyle = 'rgba(14,12,44,0.55)';
-    ctx.fillRect(0,0,VW,VH);
+    if(!underjord){ ctx.fillStyle = 'rgba(14,12,44,0.55)'; ctx.fillRect(0,0,VW,VH); }
     ctx.font='bold 15px monospace';
     drawWideBtn(VW/2-265, 38, 530, 34);
     ctx.fillStyle='#3a2a1a'; ctx.textAlign='center';
@@ -3113,35 +3120,43 @@ function drawHUD(){
   if(geOpen) drawGe();
   if(dialogOpen) drawDialog();
 }
-// mörkret i gruvan: svart med ljusglober kring spelarna (ritas före HUD)
+// mörkret i gruvan: eget OFFSCREEN-lager med urstansade ljusglober som sedan läggs ovanpå världen.
+// (att stansa direkt i huvudcanvasen raderade även golvet/spelaren under — man såg sidbakgrunden, inte ljus)
+let darkCv = null;
 function drawCaveDark(ox, oy){
+  if(!darkCv || darkCv.width!==VW || darkCv.height!==VH){ darkCv = document.createElement('canvas'); darkCv.width = VW; darkCv.height = VH; }
+  const g2 = darkCv.getContext('2d');
+  g2.clearRect(0, 0, VW, VH);
   // helsvart utanför grottregionen (ytan ovanför / husrummen nedanför får inte skymta)
   const topp = CAVE_Y0*TS-oy, botten = (CAVE_Y1+1)*TS-oy;
-  ctx.fillStyle = '#060409';
-  if(topp > 0) ctx.fillRect(0, 0, VW, topp);
-  if(botten < VH) ctx.fillRect(0, botten, VW, VH-botten);
-  ctx.fillStyle = 'rgba(6,5,10,0.93)';
-  ctx.fillRect(0, Math.max(0,topp), VW, Math.min(VH,botten)-Math.max(0,topp));
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-out';
+  g2.fillStyle = '#060409';
+  if(topp > 0) g2.fillRect(0, 0, VW, topp);
+  if(botten < VH) g2.fillRect(0, botten, VW, VH-botten);
+  g2.fillStyle = 'rgba(6,5,10,0.93)';
+  g2.fillRect(0, Math.max(0,topp), VW, Math.min(VH,botten)-Math.max(0,topp));
+  g2.globalCompositeOperation = 'destination-out';
   for(const p of players){
-    const g = ctx.createRadialGradient(p.x-ox, p.y-oy, 20, p.x-ox, p.y-oy, 130);
+    const g = g2.createRadialGradient(p.x-ox, p.y-oy, 34, p.x-ox, p.y-oy, 150); // generös glob: spelaren + en bit runtomkring fullt synlig
     g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(p.x-ox-130, p.y-oy-130, 260, 260);
+    g2.fillStyle = g;
+    g2.fillRect(p.x-ox-150, p.y-oy-150, 300, 300);
   }
-  // stegarna och handlaren lyser också svagt
+  // utgångar/stegar och handlaren lyser också (i authored rum: rummets egen utgång, inte gamla grott-stegar)
   const punkter = [];
-  if(caveExit) punkter.push([caveExit.tx*TS+16, caveExit.ty*TS+16]);
-  if(caveDown) punkter.push([caveDown.tx*TS+16, caveDown.ty*TS+16]);
-  for(const s of shops) if(s.merch) punkter.push([(s.tx+1)*TS, (s.ty+1)*TS]);
-  for(const [lx,ly] of punkter){
-    const g = ctx.createRadialGradient(lx-ox, ly-oy, 6, lx-ox, ly-oy, 70);
-    g.addColorStop(0, 'rgba(0,0,0,0.9)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(lx-ox-70, ly-oy-70, 140, 140);
+  if(subAktiv){ if(subAktiv.exit) punkter.push([subAktiv.exit.tx*TS+16, subAktiv.exit.ty*TS+16]); }
+  else {
+    if(caveExit) punkter.push([caveExit.tx*TS+16, caveExit.ty*TS+16]);
+    if(caveDown) punkter.push([caveDown.tx*TS+16, caveDown.ty*TS+16]);
+    for(const s of shops) if(s.merch) punkter.push([(s.tx+1)*TS, (s.ty+1)*TS]);
   }
-  ctx.restore();
+  for(const [lx,ly] of punkter){
+    const g = g2.createRadialGradient(lx-ox, ly-oy, 10, lx-ox, ly-oy, 80);
+    g.addColorStop(0, 'rgba(0,0,0,0.95)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    g2.fillStyle = g;
+    g2.fillRect(lx-ox-80, ly-oy-80, 160, 160);
+  }
+  g2.globalCompositeOperation = 'source-over';
+  ctx.drawImage(darkCv, 0, 0);
 }
 // fångstregistret (F): alla arter — fångade i färg med antal, ofångade som ?
 function drawRegister(){
