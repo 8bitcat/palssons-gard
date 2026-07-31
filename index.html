@@ -1,6 +1,7 @@
 <title>Palssons Gård</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <script src="assets.js"></script>
+<script src="gamedata.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   html,body{margin:0;padding:0;height:100%;background:#1a2416;overflow:hidden;overscroll-behavior:none}
@@ -556,12 +557,31 @@ const CROPS = {
   wheat:  { namn:'Vete',     tid:200, pris:22, fro:'Vetefrö', ikon:9, lie:true } // skördas med LIEN, arkets varuikon = frame 9
 };
 const STAGES = 5; // sista växtsteget = moget (frame 6 i arken är TOM, frame 7 = varuikon)
+// ---- DATA-DRIVNA GRÖDOR: authored defs (mapeditorns grödo-verkstad) slås ihop över standardgrödorna ----
+// en grödo-def kan ha: {namn, tid, pris, fro, regrow, ikon, sheet (ark-sökväg), skorda ('hand'|verktyg-id)}
+function ensureCropAsset(id){ // laddar in en authored grödas ark on-demand (t.ex. gröda som kom via en delad karta)
+  const c = CROPS[id]; if(!c) return;
+  if(!c.skorda) c.skorda = c.lie ? 'sickle' : 'hand';
+  if(c.sheet){ MANIFEST[id] = c.sheet;
+    if(!IMG[id]){ const im = loadImg(c.sheet); IMG[id] = im;
+      const meas = ()=>{ CROP_ANCHOR[id] = measureCropFrames(im); };
+      (im.complete && im.naturalWidth) ? meas() : im.addEventListener('load', meas);
+    }
+  }
+}
+try{ const ag = JSON.parse(localStorage.getItem('gard-crops'))||{};
+  for(const id in ag) CROPS[id] = Object.assign({}, CROPS[id], ag[id]);
+}catch(e){}
+for(const id in CROPS){ // normalisera: skörde-verktyg + registrera authored ark så det förladdas som en inbyggd gröda
+  if(!CROPS[id].skorda) CROPS[id].skorda = CROPS[id].lie ? 'sickle' : 'hand';
+  if(CROPS[id].sheet) MANIFEST[id] = CROPS[id].sheet;
+}
 
 // ===================== KARTAN =====================
-const MW = 44, WORLD_H = 30, MH = 48; // raderna under världen = husets interiör (kameran når aldrig båda samtidigt)
+let MW = 44, WORLD_H = 30, MH = 48; // dynamiska: sätts från kartan i buildMap. WORLD_H=30 = dagens standardvärld
 // husets rum: golv, väggrader ovanför, dörr-teleporter och sängen
 // tre rum: sovrum, kök, vardagsrum — dörröppningar i mellanväggarna vid rad 44–45
-const RY0 = 42, RY1 = 46;
+let RY0 = 42, RY1 = 46;
 const ROOMS = [
   { x0:3,  x1:12, floor:[15,1], wall:4 },   // sovrum (skiffervägg)
   { x0:14, x1:22, floor:[23,0], wall:10 },  // kök (rosa vägg, diamantgolv)
@@ -583,7 +603,8 @@ const solidAt = (tx,ty)=>{
   return t.kind===2 || t.kind===3;
 };
 let trees = [], fences = [], nodes = [], slimes = [];
-const HOUSE = { tx:3, ty:2, w:8, h:7 };       // sprite 128x112 → 8x7 tiles
+const HOUSE = { tx:3, ty:2, w:8, h:7 };       // sprite 128x112 → 8x7 tiles ([0] i houses = hemmet)
+let houses = [];                               // ALLA hus på ytan {tx,ty,img,w,h,doorTx,doorTy} — multi-hus-rendering
 const CHEST = { tx:16, ty:7 };                 // kistan: slem & övrigt monsterloot
 const WELL = { tx:18, ty:6 };                  // brunnen — fyll vattenkannan här
 const maxWater = p => 5 + (p.tier.can||0)*5;   // träkanna 5 skopor, kopparkanna 10
@@ -593,10 +614,11 @@ const ANVILP = { tx:15, ty:4 };                // städet (smid kopparverktyg, 2
 const CRATES = [
   { crop:'carrot', tx:11, ty:7, src:[99,31,11,17] },
   { crop:'potato', tx:12, ty:7, src:[83,97,11,15] },
-  { crop:'straw',  tx:13, ty:7, src:[51,3,11,13] }
+  { crop:'straw',  tx:13, ty:7, src:[51,3,11,13] },
+  { crop:'wheat',  tx:14, ty:7, src:[19,3,11,13] } // vete-lådan (fylld = tom-låda + räknare; Box.png saknar vete-sprite)
 ];
 const CRATE_EMPTY = [19,3,11,13];
-let crateCount = { carrot:0, potato:0, straw:0 };
+let crateCount = { carrot:0, potato:0, straw:0, wheat:0 };
 const forge = { active:false, t:0, owner:-1 };
 // ytgruvans noder öster om fältet: sten (gruvhacka → sten) + kopparådror (→ malm)
 const NODESPOTS = [ // väster om floden (x40-42)
@@ -610,23 +632,77 @@ const POND = { x0:35, y0:22, x1:39, y1:25 };
 // egna kartor från mapeditorn (localStorage 'gard-maps'); '' = standardgården
 let customMaps = {};
 try{ customMaps = JSON.parse(localStorage.getItem('gard-maps'))||{}; }catch(e){}
+if(window.__MAPS) customMaps = Object.assign({}, window.__MAPS, customMaps); // publik deploy bakar in kartorna
 let valdKarta = localStorage.getItem('gard-valdkarta') || '';
+// ===== SPEL-INSTANS: ett eget spel (eget namn + egen startsida + egen värld) laddas via ?spel=<slug> =====
+let SPEL = null, spelInstanser = {};
+try{ spelInstanser = JSON.parse(localStorage.getItem('gard-spel'))||{}; }catch(e){}
+if(window.__SPEL) spelInstanser = Object.assign({}, window.__SPEL, spelInstanser);
+try{ const _slug = new URLSearchParams(location.search).get('spel');
+  if(_slug && spelInstanser[_slug]){ SPEL = spelInstanser[_slug];
+    if(SPEL.karta!=null) valdKarta = SPEL.karta;   // instansen låser sin egen värld
+    if(SPEL.namn) document.title = SPEL.namn;      // egen flik-titel
+  }
+}catch(e){}
+// UI-layout + start-loadout per karta (från mapeditorn) — defaults matchar nuvarande HUD
+const UI = { klocka:{show:1}, pengar:{show:1}, matare:{show:1}, kort:{show:1}, hotbar:{show:1} }; // per element: {show,x,y,scale} (x/y = fraktion av skärmen; sätts i editorns UI-layout)
+let startCfg = null;
+try{ const _km0 = customMaps[valdKarta]; if(_km0){ if(_km0.ui) Object.assign(UI, _km0.ui); if(_km0.start) startCfg = _km0.start; } }catch(e){}
 // kartor från servern (delade mellan localhost/LAN/alla enheter) — webben faller tillbaka på localStorage
 fetch('/api/maps').then(r=>r.json()).then(j=>{ customMaps = Object.assign({}, customMaps, j||{}); }).catch(()=>{});
+// spel-instanser från servern (delas mellan enheter på LAN) — löser upp ?spel-instansen även på en ny enhet
+fetch('/api/spel').then(r=>r.json()).then(j=>{ if(!j) return; spelInstanser = Object.assign({}, spelInstanser, j);
+  const _slug = new URLSearchParams(location.search).get('spel');
+  if(_slug && spelInstanser[_slug] && !SPEL){ SPEL = spelInstanser[_slug];
+    if(SPEL.karta!=null){ valdKarta = SPEL.karta; try{ const km=customMaps[valdKarta]; if(km){ if(km.ui) Object.assign(UI, km.ui); if(km.start) startCfg = km.start; } }catch(e){} }
+    if(SPEL.namn) document.title = SPEL.namn;
+  }
+}).catch(()=>{});
 let monsterSpawns = null;   // slime-placeringar från kartan (blir levande varje morgon)
 let decorObjs = [];         // fritt klippta sprites från mapeditorn (statisk dekor, ev. animerad)
 let critters = [];          // levande utplacerade varelser — strövar fritt, ofarliga
 let flatDecor = [];         // platt markdekor (fläckar, hål …) — blockerar inget, ritas under allt
 let cnodes = [], cobjDefs = {}; // objektverkstadens byggen: slåbara med rätt verktyg, hp, drops, rest
 let shops = [], shopOpen = null; // butiker från editorn: {tx,ty,img,varor:[{id,pris}]} · shopOpen={s,pid,sel}
+// ===== MÖBLER: köps i affären, placeras i egna hus-interiörer (möblera-läge = tangent B inne i ett rum) =====
+const MOBLER = [
+  { id:'m_sang',  namn:'Säng',     pris:45, p:'Objects/Interior/Beds.png',              r:[7,317,33,34] },
+  { id:'m_soffa', namn:'Soffa',    pris:55, p:'Objects/Interior/Sofa and armchair.png', r:[13,17,28,22] },
+  { id:'m_bord',  namn:'Bord',     pris:30, p:'Objects/Interior/Tables and desks.png',  r:[2,198,28,24] },
+  { id:'m_stol',  namn:'Stol',     pris:12, p:'Objects/Interior/Chairs.png',            r:[160,4,16,24] },
+  { id:'m_hylla', namn:'Bokhylla', pris:40, p:'Objects/Interior/Others.png',            r:[2,51,28,41] },
+  { id:'m_tavla', namn:'Tavla',    pris:25, p:'Objects/Interior/Part 1 copiar.png',     r:[33,2,27,18] },
+  { id:'m_tv',    namn:'TV',       pris:80, p:'Objects/Interior/Part 2 copiar.png',     r:[2,2,28,22] },
+  { id:'m_kyl',   namn:'Kylskåp',  pris:70, p:'Objects/Interior/Part 9 copiar.png',     r:[128,16,16,46] },
+  { id:'m_spis',  namn:'Köksspis', pris:60, p:'Objects/Interior/Part 9 copiar.png',     r:[128,82,16,28] },
+  { id:'m_ljus',  namn:'Ljusstake',pris:15, p:'Objects/Interior/Candle 1.png',          r:[0,0,16,32] }
+];
+const MOBLER_MAP = Object.fromEntries(MOBLER.map(m=>[m.id, m]));
+let ownedMobler = {}, placedMobler = {}, mobleraLage = null; // ägda möbler · placerade {subId:[{id,x,y}]} · aktivt möblera-läge {sel,pid}
+let geOpen = null; // ge-saker till medspelare: {pid, target (spelare), sel} — öppnas med ANVÄND alldeles intill någon
 let djur = [];                  // höns & kor: {typ,x,y,hemX,hemY,mx,my,malT,animT,dir,mjolkad}
 let eggs = [];                  // ägg på marken: {x,y}
 let npcs = [], dialogOpen = null; // bybor: {def,namn,rep[],x,y,...} · dialog={npc,i,pid}
 let fangst = {};                // fångstregistret: fiskid → antal (sparas)
 let regOpen = false, kokOpen = null; // F-registret · köksmenyn {pid,sel}
 let caveLevel = 0, caveEntrance = null, caveExit = {tx:0,ty:0}, caveDown = null; // djupet
+// SUB-AREAS: authored hus-interiörer + underjordar (enhetligt portalsystem, editorn skapar dem)
+let subareas = {};   // km.subareas: {id:{w,h,ground,objs}}
+let subAktiv = null; // {id, returTx, returTy, exit} när man är inne i en sub-area
+let subDecor = [];   // möbler/dekor i den aktiva sub-arean
+let husSub = {}, stegeSub = {}; // "tx,ty"-tile → sub-area-id (hus-dörr / stege med authored yta)
 let farligNatt = localStorage.getItem('gard-farlig')==='1';
-const CAVE_Y0 = 31, CAVE_Y1 = 39; // grottregionen ligger mellan ytan (0-29) och husinteriören (40+)
+let CAVE_Y0 = 31, CAVE_Y1 = 39; // grottregionen ligger mellan ytan och husinteriören — sätts av layoutInterior()
+// grotta + husinteriör placeras RELATIVT världshöjden så vilken kartstorlek som helst funkar.
+// WORLD_H=30 ger exakt dagens layout (CAVE 31-39, RY0=42, RY1=46, MH=48) → befintliga kartor oförändrade.
+function layoutInterior(){
+  CAVE_Y0 = WORLD_H+1;  CAVE_Y1 = WORLD_H+9;
+  RY0 = WORLD_H+12;     RY1 = WORLD_H+16;
+  MH  = WORLD_H+18;
+  ROOM.y0 = RY0; ROOM.y1 = RY1;
+  ROOM_ENTRY.ty = RY0+3; ROOM_EXIT.ty = RY0+4;
+  BED.ty = RY0; TABLE.ty = RY0+2; RUG.y0 = RY0+1;
+}
 // staketets autotile-bitar (mask N1 E2 S4 W8) + grannkarta för kartbyggda staket
 const FENCE_LUT = { 0:[1,4],1:[1,4],2:[1,2],3:[0,2],4:[1,3],5:[0,1],6:[0,0],7:[0,1],8:[1,2],9:[2,2],10:[1,2],11:[1,2],12:[2,0],13:[2,1],14:[1,2],15:[1,2] };
 // materialen delar 3x3-exempellayouten men skiljer sig i post/ändbitar
@@ -646,22 +722,27 @@ const START = { x:0, y:0 }; // spelarnas startpunkt (sätts av buildMap)
 function buildMap(){
   const rng = mulberry32(77);
   map.length = 0; trees = []; fences = []; nodes = []; slimes = []; monsterSpawns = null; decorObjs = []; critters = []; flatDecor = []; cnodes = []; cobjDefs = {}; shops = []; shopOpen = null;
+  subareas = {}; subAktiv = null; subDecor = []; husSub = {}; stegeSub = {}; houses = []; ownedMobler = {}; placedMobler = {}; mobleraLage = null; geOpen = null;
   djur = []; eggs = []; npcs = []; dialogOpen = null; kokOpen = null; caveLevel = 0; caveEntrance = null; caveDown = null; fangst = {}; regOpen = false;
   fenceAutoSet = new Map();
+  const km = valdKarta && customMaps[valdKarta];
+  MW      = Math.min(200, Math.max(20, (km && +km.w) || 44));   // världsbredd från kartan (standard 44)
+  WORLD_H = Math.min(200, Math.max(15, (km && +km.h) || 30));   // världshöjd från kartan (standard 30)
+  layoutInterior();                                             // grotta/interiör + MH relativt WORLD_H
   // återställ systemobjektens standardpositioner (egna kartor flyttar dem)
   HOUSE.tx=3; HOUSE.ty=2; HOUSE.img='house';
   CHEST.tx=16; CHEST.ty=7; FORGE.tx=12; FORGE.ty=4; ANVILP.tx=15; ANVILP.ty=4; WELL.tx=18; WELL.ty=6;
   DOOR_OUT.tx=5; DOOR_OUT.ty=8; DOOR_SPAWN.tx=6; DOOR_SPAWN.ty=9;
-  [[11,7],[12,7],[13,7]].forEach(([cx,cy],i)=>{ CRATES[i].tx=cx; CRATES[i].ty=cy; CRATES[i].flyttad=false; });
+  [[11,7],[12,7],[13,7],[14,7]].forEach(([cx,cy],i)=>{ CRATES[i].tx=cx; CRATES[i].ty=cy; CRATES[i].flyttad=false; });
   FIELD.x0=12; FIELD.y0=11; FIELD.x1=32; FIELD.y1=21;
   for(let y=0;y<MH;y++) for(let x=0;x<MW;x++){
     map.push({ kind:0, g:(rng()<0.12?1:0)+(rng()<0.06?2:0), soil:null });
   }
   const set = (x,y,k)=>{ if(x>=0&&y>=0&&x<MW&&y<MH) map[y*MW+x].kind = k; };
-  crateCount = { carrot:0, potato:0, straw:0 };
-  const km = valdKarta && customMaps[valdKarta];
+  crateCount = { carrot:0, potato:0, straw:0, wheat:0 };
   if(km && km.ground) buildCustom(km, set);
   else buildStandard(set, rng);
+  if(!houses.length) houses.push({ tx:HOUSE.tx, ty:HOUSE.ty, img:HOUSE.img, w:HOUSE.w, h:HOUSE.h, doorTx:DOOR_OUT.tx, doorTy:DOOR_OUT.ty }); // hemmet (standardkarta)
   buildInterior(set);
 }
 function buildCustom(km, set){
@@ -677,8 +758,15 @@ function buildCustom(km, set){
   // objekt
   START.x = (km.spawn?.x??8)*TS+16; START.y = (km.spawn?.y??8)*TS+16;
   cobjDefs = km.cobj || {};
+  subareas = km.subareas || {}; // authored hus-interiörer + underjordar
+  // kartinbäddade grödo-defs (så en delad karta bär med sig sina egna grödor + verktygskoppling)
+  if(km.crops){ for(const id in km.crops){ const nyGroda = !CROPS[id];
+    CROPS[id] = Object.assign({}, CROPS[id], km.crops[id]); ensureCropAsset(id);
+    if(nyGroda) TOOLDEF.push({ namn: CROPS[id].fro || (CROPS[id].namn+'frö'), seed:id }); } }
+  if(km.ui) Object.assign(UI, km.ui);   // UI-layout från kartan
+  if(km.start) startCfg = km.start;     // start-loadout från kartan
   let husSatt = false, kista = false, ugn = false, stad = false, brunn = false;
-  const lador = { lada_c:0, lada_p:1, lada_s:2 };
+  const lador = { lada_c:0, lada_p:1, lada_s:2, lada_w:3 };
   monsterSpawns = [];
   for(const o of (km.objs||[])){
     const x = o.x, y = o.y;
@@ -686,13 +774,14 @@ function buildCustom(km, set){
     else if(o.t==='stubbe'){ trees.push({tx:x, ty:y, hp:3, stump:true, regrowDag:9999, shakeT:0}); }
     else if(o.t==='sten'){ nodes.push({tx:x, ty:y, type:'rock', hp:2, brutet:false}); set(x,y,3); }
     else if(o.t==='koppar'){ nodes.push({tx:x, ty:y, type:'copper', hp:3, brutet:false}); set(x,y,3); }
-    else if(o.t && o.t.startsWith('hus') && !husSatt){
-      husSatt = true;
-      HOUSE.tx = x; HOUSE.ty = y; HOUSE.img = {hus3:'house', hus2:'husB', hus1:'husA', hus4:'husC'}[o.t]||'house';
+    else if(o.t && o.t.startsWith('hus')){ // ALLA hus renderas + blir solida + får dörr (multi-hus)
+      const himg = {hus3:'house', hus2:'husB', hus1:'husA', hus4:'husC'}[o.t]||'house';
+      const dtx = x+2, dty = y+6;
       for(let hy=y+3; hy<y+HOUSE.h; hy++) for(let hx=x; hx<x+HOUSE.w; hx++) set(hx,hy,3);
-      DOOR_OUT.tx = x+2; DOOR_OUT.ty = y+6;
-      DOOR_SPAWN.tx = x+3; DOOR_SPAWN.ty = y+7;
-      set(DOOR_OUT.tx, DOOR_OUT.ty, 0); set(DOOR_OUT.tx+1, DOOR_OUT.ty, 0);
+      set(dtx, dty, 0); set(dtx+1, dty, 0);
+      if(o.id && (km.subareas||{})[o.id]){ husSub[dtx+','+dty] = o.id; husSub[(dtx+1)+','+dty] = o.id; } // authored interiör → dörren leder dit
+      houses.push({ tx:x, ty:y, img:himg, w:HOUSE.w, h:HOUSE.h, doorTx:dtx, doorTy:dty });
+      if(!husSatt){ husSatt = true; HOUSE.tx=x; HOUSE.ty=y; HOUSE.img=himg; DOOR_OUT.tx=dtx; DOOR_OUT.ty=dty; DOOR_SPAWN.tx=x+3; DOOR_SPAWN.ty=y+7; } // första huset = hemmet (standard-interiör)
     }
     else if(o.t==='kista'){ CHEST.tx=x; CHEST.ty=y; set(x,y,3); kista=true; }
     else if(o.t==='ugn'){ FORGE.tx=x; FORGE.ty=y; set(x,y,3); ugn=true; }
@@ -719,7 +808,7 @@ function buildCustom(km, set){
     else if(o.t==='honshus' || o.t==='lada'){ laggDjurByggnad(o.t, x, y); }
     else if(o.t==='hona' || o.t==='ko'){ laggDjur(o.t, x, y); }
     else if(o.t==='npc'){ laggNpc(PRESETS[(o.look||0)%PRESETS.length], o.namn||'Bybo', o.rep&&o.rep.length?o.rep:['Hej!'], x, y); }
-    else if(o.t==='stege'){ if(!caveEntrance) caveEntrance = { tx:x, ty:y }; }
+    else if(o.t==='stege'){ if(!caveEntrance) caveEntrance = { tx:x, ty:y }; if(o.id && (km.subareas||{})[o.id]) stegeSub[x+','+y] = o.id; } // authored underjord → stegen leder dit
     else if(o.t==='stegeUpp'){ /* används av grottgeneratorn */ }
     else if(o.t==='cobj' && cobjDefs[o.id] && cobjDefs[o.id].idle){ // verkstadsbygge
       const def = cobjDefs[o.id], s = def.idle;
@@ -829,11 +918,11 @@ function buildInterior(set){
   // interiören: allt under världen är blockerat utom rummets golv
   for(let y=WORLD_H;y<MH;y++) for(let x=0;x<MW;x++) set(x,y,3);
   for(const r of ROOMS) for(let y=RY0;y<=RY1;y++) for(let x=r.x0;x<=r.x1;x++) set(x,y,0);
-  for(const gx of [13,23]) for(const gy of [44,45]) set(gx,gy,0); // dörröppningar mellan rummen
+  for(const gx of [13,23]) for(const gy of [RY0+2,RY0+3]) set(gx,gy,0); // dörröppningar mellan rummen
   set(BED.tx,BED.ty,3); set(BED.tx+1,BED.ty,3); set(BED.tx,BED.ty+1,3); set(BED.tx+1,BED.ty+1,3);
   set(TABLE.tx,TABLE.ty,3); set(TABLE.tx+1,TABLE.ty,3);
   for(let x=15;x<=21;x++) set(x,RY0,3);          // köksbänkraden
-  set(26,44,3); set(27,44,3);                     // soffan
+  set(26,RY0+2,3); set(27,RY0+2,3);               // soffan
   set(30,RY0,3); set(31,RY0,3);                   // pianot
 }
 // ny dag: energi, väder, träd växer tillbaka, gruvnoder respawnar, slimes vandrar in
@@ -887,7 +976,9 @@ function save(){
       crates: crateCount,
       cn: cnodes.map(c=>({h:c.hp, d:c.dead?1:0})),
       fangst,
-      pl: players.map(p=>({nm:p.name, def:p.def, seeds:p.seeds, carry:p.carry, en:Math.round(p.energy), hp:Math.round(p.hp), mats:p.mats, malm:p.malm, tackor:p.tackor, fisk:p.fisk, rust:p.rust, tier:p.tier, tool:p.tool, wa:p.water}))
+      pl: players.map(p=>({nm:p.name, def:p.def, seeds:p.seeds, carry:p.carry, en:Math.round(p.energy), hp:Math.round(p.hp), mats:p.mats, malm:p.malm, tackor:p.tackor, fisk:p.fisk, rust:p.rust, tier:p.tier, tool:p.tool, wa:p.water})),
+      forge: forge.active ? { t:forge.t, owner:forge.owner, metall:forge.metall } : null, // ugnen i arbete överlever omladdning (annars förstördes malm+stock)
+      mobler: ownedMobler, placed: placedMobler // köpta + utplacerade möbler
     };
     localStorage.setItem(SAVEKEY(), JSON.stringify(data));
   }catch(e){}
@@ -907,11 +998,18 @@ window.addEventListener('keydown', e=>{
   keys[e.code] = true;
   if(!e.repeat) kbLatch[e.code] = true;
   if((e.code==='KeyP'||e.code==='Escape'||e.code==='KeyI'||e.code==='Tab') && state==='play'){
-    if(shopOpen){ shopOpen = null; kbLatch[e.code] = false; } // Escape i butiken stänger den, pausar inte
+    if(shopOpen){ shopOpen = null; kbLatch[e.code] = false; }           // Escape i en meny stänger menyn — pausar inte
+    else if(geOpen){ geOpen = null; kbLatch[e.code] = false; }
+    else if(mobleraLage){ mobleraLage = null; kbLatch[e.code] = false; }
     else paused = !paused;
   }
   if(e.code==='KeyT' && state==='play' && !paused) trySleep();
   if(e.code==='KeyF' && state==='play' && !paused) regOpen = !regOpen;
+  if(e.code==='KeyB' && state==='play' && !paused){ // möblera-läge (bara inne i ett hus/rum)
+    if(subAktiv){ mobleraLage = mobleraLage ? null : { sel:0, pid: players[0]?players[0].id:0 };
+      if(mobleraLage) toast('Möblera: ▲▼ välj möbel · ANVÄND placera/plocka · B stäng'); }
+    else toast('Gå in i ett hus först (dörren) — där kan du möblera med B.');
+  }
   if(e.code==='KeyG' && state==='play' && !paused){
     farligNatt = !farligNatt;
     localStorage.setItem('gard-farlig', farligNatt?'1':'0');
@@ -969,7 +1067,7 @@ function rawCtrl(id){
   return { x, y, attack:b(0)||b(7), special:b(1)||b(2)||b(6) };
 }
 function pollInputs(){
-  const ids = ['k0', ...Object.keys(NET.ctrls).filter(i=>NET.ctrls[i].alive)];
+  const ids = ['k0', ...Object.keys(NET.ctrls)]; // poll ÄVEN frånkopplade (drop nollar deras state) → spelaren stannar i st f att köra sista inputen för evigt
   if(LOCALPAD) ids.push('t0');
   const gps = pads();
   for(let i=0;i<gps.length;i++) if(gps[i]) ids.push('p'+i);
@@ -1224,10 +1322,8 @@ const TOOLDEF = [
   {id:'sickle', namn:'Lie'},
   {id:'sword',  namn:'Svärd'},
   {id:'rod',    namn:'Fiskespö'},
-  {namn:'Morotsfrö',    seed:'carrot'},
-  {namn:'Potatisfrö',   seed:'potato'},
-  {namn:'Jordgubbsfrö', seed:'straw'},
-  {namn:'Vetefrö',      seed:'wheat'}
+  // frö-slots genereras ur CROPS → varje authored gröda får automatiskt ett frö i hotbaren
+  ...Object.keys(CROPS).map(id=>({ namn: CROPS[id].fro || (CROPS[id].namn+'frö'), seed:id }))
 ];
 const SLOTKEYS = ['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9','Digit0','Minus','Equal'];
 const SLOTLBL  = ['1','2','3','4','5','6','7','8','9','0','-','='];
@@ -1280,13 +1376,13 @@ function ftext(x,y,txt,col){ texts.push({x,y,txt,col,ttl:1.2}); }
 function burst(x,y,col,n){ for(let i=0;i<n;i++){ const a=Math.random()*Math.PI*2, s=30+Math.random()*60; parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-30,ttl:0.5,max:0.5,col,sz:2+Math.random()*2}); } }
 
 function makePlayer(i, ctrlId, def, name){
-  return {
+  const _p = {
     id:i, ctrlId, def, name: name || ('Bonde #'+(i+1)), col: CHARCOLS[i%CHARCOLS.length],
     x:START.x+(i%3)*30, y:START.y+Math.floor(i/3)*30,
     dir:0, anim:'idle', animT:0, busy:0, actAt:0, actDone:false,
     tool:0, energy:100, hp:100,
-    seeds:{carrot:10, potato:6, straw:4, wheat:8},
-    carry:{carrot:0, potato:0, straw:0, wheat:0},
+    seeds: Object.fromEntries(Object.keys(CROPS).map(id=>[id, ({carrot:10,potato:6,straw:4,wheat:8})[id]||0])),
+    carry: Object.fromEntries(Object.keys(CROPS).map(id=>[id, 0])),
     mats:{wood:0, stone:0, goo:0, agg:0, mjolk:0},
     malm:{koppar:0, jarn:0, guld:0, platina:0, crimson:0, frost:0, shadow:0, fairy:0, obsidian:0},
     tackor:{koppar:0, jarn:0, guld:0, platina:0, crimson:0, frost:0, shadow:0, fairy:0, obsidian:0},
@@ -1296,6 +1392,11 @@ function makePlayer(i, ctrlId, def, name){
     lastCrop:null, hurtT:0,
     moving:false
   };
+  if(startCfg){ // start-loadout från kartan (mapeditorn): extra frön + start-verktygsnivå
+    if(startCfg.seeds) Object.assign(_p.seeds, startCfg.seeds);
+    if(startCfg.tier)  Object.assign(_p.tier,  startCfg.tier);
+  }
+  return _p;
 }
 function scanForJoiners(){
   const used = new Set([...joiners.map(j=>j.ctrlId), ...players.map(p=>p.ctrlId)]);
@@ -1315,25 +1416,28 @@ function scanForJoiners(){
 }
 function startGame(){
   buildMap();
+  if(startCfg && startCfg.coins!=null) coins = startCfg.coins; // fräsch start-kassa från kartan (save vinner nedan)
   const sv = loadSave();
   players = joiners.map((j,i)=>makePlayer(i, j.ctrlId, j.def || {...PRESETS[j.ci%5]}, j.name));
   joiners = [];
   if(sv && (sv.v===2||sv.v===3) && sv.kinds && (sv.kinds.length===MW*MH || sv.kinds.length===MW*WORLD_H)){
     dag = sv.dag||1; coins = sv.coins||0; vader = sv.vader||'sol';
+    if(sv.forge){ forge.active=true; forge.t=sv.forge.t; forge.owner=sv.forge.owner; forge.metall=sv.forge.metall; } // återuppta pågående smältning
+    ownedMobler = sv.mobler||{}; placedMobler = sv.placed||{}; // köpta + utplacerade möbler
     for(let i=0;i<Math.min(map.length, sv.kinds.length);i++){
       map[i].kind = sv.kinds[i];
       const s = sv.soil && sv.soil[i];
       if(s && typeof s==='object'){
         map[i].soil = { wet:!!s.w, wetT:s.w?60:0, farad: s.f!==undefined ? !!s.f : true, crop: s.c ? {id:s.c.i, stage:s.c.s, prog:s.c.p} : null };
         if(map[i].kind!==4) map[i].kind = 4;
-      }
+      } else map[i].soil = null; // saven säger ingen jord här → rensa ev. förbyggd jord (annars kunde grödor odlas på vatten)
     }
     // interiören + dörren är facit oavsett vad saven säger (äldre saves saknar rummet)
     for(let y=WORLD_H;y<MH;y++) for(let x=0;x<MW;x++) map[y*MW+x].kind = 3;
     for(const r of ROOMS) for(let y=RY0;y<=RY1;y++) for(let x=r.x0;x<=r.x1;x++) map[y*MW+x].kind = 0;
-    for(const gx of [13,23]) for(const gy of [44,45]) map[gy*MW+gx].kind = 0;
+    for(const gx of [13,23]) for(const gy of [RY0+2,RY0+3]) map[gy*MW+gx].kind = 0;
     for(let x=15;x<=21;x++) map[RY0*MW+x].kind = 3;
-    map[44*MW+26].kind=3; map[44*MW+27].kind=3;
+    map[(RY0+2)*MW+26].kind=3; map[(RY0+2)*MW+27].kind=3;
     map[RY0*MW+30].kind=3; map[RY0*MW+31].kind=3;
     map[BED.ty*MW+BED.tx].kind=3; map[BED.ty*MW+BED.tx+1].kind=3;
     map[(BED.ty+1)*MW+BED.tx].kind=3; map[(BED.ty+1)*MW+BED.tx+1].kind=3;
@@ -1398,6 +1502,7 @@ function kopVara(p){
   if(RUSTNING[v.id]){ p.rust[v.id] = 1; toast(p.name+' tog på sig '+RUSTNING[v.id].namn.toLowerCase()+'en — mindre skada!'); }
   else if(CROPS[v.id]) p.seeds[v.id] = (p.seeds[v.id]||0)+1;
   else if(p.malm[v.id]!==undefined) p.malm[v.id]++;
+  else if(MOBLER_MAP[v.id]){ ownedMobler[v.id] = (ownedMobler[v.id]||0)+1; toast(MOBLER_MAP[v.id].namn+' köpt! Gå in i ett hus och tryck B för att möblera.'); }
   else p.mats[v.id] = (p.mats[v.id]||0)+1;
   burst(p.x, p.y-20, '#ffd24f', 6);
   save();
@@ -1459,6 +1564,7 @@ function genCave(level){
   // stege upp (vänster) + ned (höger)
   caveExit = { tx:2, ty:CAVE_Y0+4 };
   map[caveExit.ty*MW+caveExit.tx].kind = 0;
+  for(const [dx,dy] of [[1,0],[2,0],[1,1]]){ const t2 = map[(caveExit.ty+dy)*MW+caveExit.tx+dx]; if(t2) t2.kind = 0; } // spelarnas spawnrutor alltid golv
   caveDown = level<5 ? { tx:MW-4, ty:CAVE_Y0+2+((rng()*6)|0) } : null;
   if(caveDown) map[caveDown.ty*MW+caveDown.tx].kind = 0;
   // malmer per nivå (fas 6: temametallerna i djupet)
@@ -1481,7 +1587,7 @@ function genCave(level){
   }
   // goblinhandlaren på nivå 3
   if(level===3){
-    const hx = 8+((rng()*20)|0), hy = CAVE_Y0+3;
+    const hx = Math.min(MW-3, 8+((rng()*20)|0)), hy = CAVE_Y0+3; // klampa inom kartan (smala kartor)
     shops.push({ tx:hx, ty:hy, merch:true, varor:[
       { id:'helm', pris:RUSTNING.helm.pris }, { id:'plate', pris:RUSTNING.plate.pris },
       { id:'jarn', pris:20 }, { id:'guld', pris:45 }
@@ -1501,6 +1607,61 @@ function lamnaCave(){
   players.forEach((p,i)=>{ p.x = caveEntrance.tx*TS+16+(i%3)*20; p.y = (caveEntrance.ty+1)*TS+16; });
   camSnap = true;
   toast('Uppe i dagsljuset igen!');
+}
+// ===== SUB-AREAS: gå in i authored hus-interiör / underjord — laddas i grott-bandet (swap-on-enter, som genCave) =====
+function loadSub(sa){
+  for(let y=CAVE_Y0;y<=CAVE_Y1;y++) for(let x=0;x<MW;x++){ const t=map[y*MW+x]; if(t){ t.kind=3; t.soil=null; } } // rensa bandet
+  subDecor = [];
+  let entry = { x:2, y:CAVE_Y0+2 }, exit = null;
+  const sw = sa.w||MW, w = Math.min(sw, MW), h = Math.min(sa.h||1, CAVE_Y1-CAVE_Y0+1);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const g = (sa.ground||[])[y*sw+x]||0, t = map[(CAVE_Y0+y)*MW+x]; if(!t) continue;
+    t.kind = g===1?1 : g===2?2 : g===3?4 : (g>=4&&g<=11)?10+(g-4) : 0; // samma markmappning som ytan
+  }
+  for(const o of (sa.objs||[])){
+    const oy = CAVE_Y0 + (o.y||0), ox = o.x||0;
+    if(o.t==='exit'){ exit = { tx:ox, ty:oy }; if(map[oy*MW+ox]) map[oy*MW+ox].kind = 0; }
+    else if(o.t==='entry'){ entry = { x:ox, y:oy }; }
+    else if(o.t==='fri' && o.p && o.r){ const fw=Math.max(1,Math.round(o.r[2]*2/TS)), fh=Math.max(1,Math.round(o.r[3]*2/TS)); subDecor.push({p:o.p,r:o.r,tx:ox,ty:oy,fw,fh}); }
+    else if(o.t==='npc'){ laggNpc(PRESETS[(o.look||0)%PRESETS.length], o.namn||'Bybo', o.rep&&o.rep.length?o.rep:['Hej!'], ox, oy); }
+  }
+  return { entry, exit };
+}
+function enterSub(id, rtx, rty){
+  const sa = subareas[id]; if(!sa) return false;
+  caveLevel = 0; // authored sub, inte procedurgrotta
+  const { entry, exit } = loadSub(sa);
+  for(const m of (placedMobler[id]||[])){ const md=MOBLER_MAP[m.id]; if(md) subDecor.push({ p:md.p, r:md.r, tx:m.x, ty:CAVE_Y0+m.y, fw:Math.max(1,Math.round(md.r[2]*2/TS)), fh:Math.max(1,Math.round(md.r[3]*2/TS)), placed:m }); } // spelare-placerade möbler laddas in
+  subAktiv = { id, returTx:rtx, returTy:rty, exit, mork:!!sa.mork };
+  players.forEach((p,i)=>{ p.x = entry.x*TS+16+(i%3)*20; p.y = entry.y*TS+16+Math.floor(i/3)*16; p.fiske=null; });
+  camSnap = true; toast('Inne — ANVÄND vid utgången för att komma ut');
+  return true;
+}
+function exitSub(){
+  if(!subAktiv) return;
+  const rtx = subAktiv.returTx, rty = subAktiv.returTy; subAktiv = null; subDecor = []; mobleraLage = null;
+  players.forEach((p,i)=>{ p.x = rtx*TS+16+(i%3)*16; p.y = (rty+1)*TS+16; });
+  camSnap = true;
+}
+// vad en spelare kan ge bort: frön, skördade grödor, material, malm, tackor, fisk (mynt är familje-delade)
+function geLista(p){
+  const l = [];
+  for(const id in p.seeds)  if(p.seeds[id]>0)  l.push({ kat:'seeds',  id, namn:(CROPS[id]?CROPS[id].fro:id),        n:p.seeds[id] });
+  for(const id in p.carry)  if(p.carry[id]>0)  l.push({ kat:'carry',  id, namn:(CROPS[id]?CROPS[id].namn:id),       n:p.carry[id] });
+  for(const id in p.mats)   if(p.mats[id]>0)   l.push({ kat:'mats',   id, namn:(MATDEF[id]||id),                    n:p.mats[id] });
+  for(const id in p.malm)   if(p.malm[id]>0)   l.push({ kat:'malm',   id, namn:(METALS.find(m=>m&&m.id===id)||{}).namn+'malm', n:p.malm[id] });
+  for(const id in p.tackor) if(p.tackor[id]>0) l.push({ kat:'tackor', id, namn:(METALS.find(m=>m&&m.id===id)||{}).namn+'tacka', n:p.tackor[id] });
+  for(const id in p.fisk)   if(p.fisk[id]>0)   l.push({ kat:'fisk',   id, namn:(FISKAR.find(f=>f.id===id)||{}).namn||id, n:p.fisk[id] });
+  return l;
+}
+function geSak(fran, till, post){ // flytta 1 st av posten mellan spelarna
+  const f = fran[post.kat], t = till[post.kat];
+  if(!f || !f[post.id]) return false;
+  f[post.id]--; t[post.id] = (t[post.id]||0)+1;
+  ftext(till.x, till.y-40, '+1 '+post.namn+' av '+fran.name, '#7ee87e');
+  burst(till.x, till.y-10, '#7ee87e', 6);
+  save();
+  return true;
 }
 function useTool(p){
   // butiken: stå vid dörren och ANVÄND — öppnar handelsmenyn (goblinhandlaren står själv i disken)
@@ -1531,8 +1692,15 @@ function useTool(p){
   // köksspisen (i köket): laga mat
   const ptx = Math.floor(p.x/TS), pty = Math.floor((p.y+8)/TS);
   if(pty>=RY0-1 && pty<=RY1 && ptx>=19 && ptx<=22){ kokOpen = { pid:p.id, sel:0 }; return; }
+  // authored sub-area (hus-interiör/underjord): ut via exit-tile · in via stege-portal
+  if(subAktiv){
+    if(subAktiv.exit && dist(p.x, p.y, subAktiv.exit.tx*TS+16, subAktiv.exit.ty*TS+16) < 48){ exitSub(); return; }
+  } else if(caveLevel===0){
+    for(const key in stegeSub){ const [sx,sy] = key.split(',').map(Number);
+      if(dist(p.x, p.y, sx*TS+16, sy*TS+16) < 52){ if(enterSub(stegeSub[key], sx, sy)) return; } }
+  }
   // gruvan: ingången på ytan / stegarna där nere
-  if(caveEntrance && caveLevel===0 && dist(p.x, p.y, caveEntrance.tx*TS+16, caveEntrance.ty*TS+16) < 52){ enterCave(1); return; }
+  if(caveEntrance && caveLevel===0 && !subAktiv && dist(p.x, p.y, caveEntrance.tx*TS+16, caveEntrance.ty*TS+16) < 52){ enterCave(1); return; }
   if(caveLevel>0){
     if(dist(p.x, p.y, caveExit.tx*TS+16, caveExit.ty*TS+16) < 48){
       if(caveLevel===1){ lamnaCave(); } else { enterCave(caveLevel-1); }
@@ -1568,24 +1736,37 @@ function useTool(p){
   }
   if(dist(p.x, p.y, FORGE.tx*TS+16, FORGE.ty*TS+16) < 60){ useForge(p); return; }
   if(dist(p.x, p.y, ANVILP.tx*TS+16, ANVILP.ty*TS+16) < 60){ useAnvil(p); return; }
+  // GE-SAKER: stå ALLDELES intill en medspelare (< 34 px = medveten kram-distans) → ge-menyn
+  const kompis = players.find(q=>q!==p && dist(p.x, p.y, q.x, q.y) < 34);
+  if(kompis){
+    const l = geLista(p);
+    if(l.length){ geOpen = { pid:p.id, target:kompis, sel:0 }; return; }
+    ftext(p.x, p.y-40, 'Inget att ge bort än!', '#9aab88'); return;
+  }
   const [tx,ty] = facingTile(p);
   if(tx<0||ty<0||tx>=MW||ty>=MH) return;
   const t = map[ty*MW+tx];
-  // skörda moget för hand — utom lie-grödor (vete): de kräver lien
-  if(t.soil && t.soil.crop && t.soil.crop.stage>=STAGES && CROPS[t.soil.crop.id].lie){
-    if(TOOLDEF[p.tool].id!=='sickle'){ ftext(tx*TS+16, ty*TS, 'Vete huggs med LIEN [6]', '#e8c96a'); return; }
-  }
-  if(t.soil && t.soil.crop && t.soil.crop.stage>=STAGES && !CROPS[t.soil.crop.id].lie){
+  // skörda moget: grödan är knuten till ett verktyg (skorda='hand' = plockas för hand oavsett verktyg)
+  if(t.soil && t.soil.crop && t.soil.crop.stage>=STAGES){
     const c = t.soil.crop;
-    startAct(p, 'pick', ()=>{
-      p.carry[c.id]++; p.lastCrop = c.id;
+    if(!CROPS[c.id]){ t.soil.crop = null; return; } // föräldralös gröda (def borttagen) — rensa tyst, krascha inte
+    const need = CROPS[c.id].skorda || (CROPS[c.id].lie ? 'sickle' : 'hand');
+    const skorda = (n, anim) => startAct(p, anim, ()=>{
+      p.carry[c.id] = (p.carry[c.id]||0) + n; p.lastCrop = c.id;
       burst(tx*TS+16, ty*TS+16, '#e8c96a', 8);
-      ftext(tx*TS+16, ty*TS, '+1 '+CROPS[c.id].namn, '#e8c96a');
+      ftext(tx*TS+16, ty*TS, '+'+n+' '+CROPS[c.id].namn, '#e8c96a');
       if(CROPS[c.id].regrow){ c.stage = CROPS[c.id].regrow; c.prog = c.stage*(CROPS[c.id].tid/STAGES); }
       else t.soil.crop = null;
       p.energy = Math.max(0, p.energy-1);
     });
-    return;
+    if(need==='hand'){ skorda(1, 'pick'); return; }
+    // kräver ett verktyg — rätt verktyg måste vara i handen (koppar+ ger fler per skörd)
+    if(TOOLDEF[p.tool].id !== need){
+      const vn = (TOOLDEF.find(d=>d.id===need)||{}).namn || need;
+      ftext(tx*TS+16, ty*TS, CROPS[c.id].namn+' skördas med '+vn, '#e8c96a'); return;
+    }
+    const anim = ({sickle:'sickle',axe:'axe',pick:'pickx',sword:'sword',shovel:'shovel',hoe:'hoe'})[need] || 'pick';
+    skorda(1 + (p.tier[need]||0), anim); return;
   }
   if(p.energy<=0){ ftext(p.x, p.y-40, 'Trött! Sov (T)', '#ff8a6a'); return; }
   const td = TOOLDEF[p.tool];
@@ -1642,7 +1823,7 @@ function useTool(p){
     else if(t.soil && t.soil.farad && !t.soil.crop) ftext(p.x, p.y-40, 'Fårorna är klara — så med frön!', '#9aab88');
   } else if(td.id==='sickle'){
     // lien hugger moget vete (och framtida säd)
-    if(t.soil && t.soil.crop && t.soil.crop.stage>=STAGES && CROPS[t.soil.crop.id].lie){
+    if(t.soil && t.soil.crop && t.soil.crop.stage>=STAGES && CROPS[t.soil.crop.id]?.lie){
       const c = t.soil.crop;
       startAct(p,'sickle',()=>{
         const n = 1 + p.tier.sickle;
@@ -1745,6 +1926,7 @@ function useForge(p){
     forge.active = true; forge.t = 20; forge.owner = p.id; forge.metall = metall;
     burst(FORGE.tx*TS+16, FORGE.ty*TS, '#e8a25c', 10);
     toast('Ugnen smälter '+METALS.find(m=>m&&m.id===metall).namn.toLowerCase()+'malm… (20 s)');
+    save(); // persistera avdraget + ugns-tillståndet direkt → aldrig förlorad malm/stock
   } else ftext(FORGE.tx*TS+16, FORGE.ty*TS-14, 'Behövs: 2 malm av samma metall + 1 stock', '#9aab88');
 }
 // städet: uppgradera verktyget med LÄGST nivå — 2 tackor av nästa metall i kedjan
@@ -1825,12 +2007,14 @@ function sellCarry(p){
   // kistan köper slem, fisk, vete, ägg & mjölk — grönsakerna ska i lådorna
   let sum = p.mats.goo * MATPRIS.goo; p.mats.goo = 0;
   for(const fi of FISKAR){ if(p.fisk[fi.id]){ sum += p.fisk[fi.id]*fi.pris; p.fisk[fi.id] = 0; } }
-  if(p.carry.wheat){ sum += p.carry.wheat * CROPS.wheat.pris; p.carry.wheat = 0; }
+  // kistan köper vete + alla authored grödor (morot/potatis/jordgubbe hör hemma i lådorna)
+  const ladaCrops = new Set(CRATES.map(c=>c.crop));
+  for(const id in p.carry){ if(p.carry[id] && CROPS[id] && CROPS[id].pris && !ladaCrops.has(id)){ sum += p.carry[id]*CROPS[id].pris; p.carry[id] = 0; } }
   sum += (p.mats.agg||0)*MATPRIS.agg + (p.mats.mjolk||0)*MATPRIS.mjolk;
   p.mats.agg = 0; p.mats.mjolk = 0;
   if(sum>0){ coins += sum; ftext(CHEST.tx*TS+16, CHEST.ty*TS-6, '+'+sum+' kr!', '#e8c96a'); burst(CHEST.tx*TS+16, CHEST.ty*TS+8, '#e8c96a', 12); save(); }
   else if(Object.values(p.carry).some(v=>v)) ftext(CHEST.tx*TS+16, CHEST.ty*TS-6, 'Grönsaker → lådorna!', '#9aab88');
-  else ftext(CHEST.tx*TS+16, CHEST.ty*TS-6, 'Kistan köper slem, fisk, vete, ägg & mjölk', '#9aab88');
+  else ftext(CHEST.tx*TS+16, CHEST.ty*TS-6, 'Kistan köper slem, fisk, ägg & mjölk — grödor i lådorna', '#9aab88');
 }
 function sellCrates(){
   let sum = 0;
@@ -1874,6 +2058,41 @@ function updPlayer(p, dt){
   }
   // fisket styr sin egen animation
   if(p.fiske){ uppdateraFiske(p, c, dt); return; }
+  // ge-menyn: välj sak, ge 1 st per tryck till kompisen bredvid
+  if(geOpen && geOpen.pid===p.id){
+    const l = geLista(p);
+    if(!l.length){ geOpen = null; }
+    else {
+      geOpen.sel = Math.min(geOpen.sel, l.length-1);
+      if(c.uJP) geOpen.sel = (geOpen.sel+l.length-1)%l.length;
+      if(c.dJP) geOpen.sel = (geOpen.sel+1)%l.length;
+      if(c.aJP) geSak(p, geOpen.target, l[geOpen.sel]);
+      if(c.sJP || keys['Escape'] || kbLatch['Escape'] || dist(p.x,p.y,geOpen.target.x,geOpen.target.y)>80){ kbLatch['Escape']=false; geOpen=null; } // gå iväg = stäng
+      p.anim='idle'; p.animT+=dt; return;
+    }
+  }
+  // möblera-läge: placera/plocka köpta möbler i den aktiva sub-arean (huset man är inne i)
+  if(mobleraLage && mobleraLage.pid===p.id && subAktiv){
+    const owned = MOBLER.filter(m=>(ownedMobler[m.id]||0)>0);
+    if(owned.length){
+      if(c.uJP) mobleraLage.sel = (mobleraLage.sel+owned.length-1)%owned.length;
+      if(c.dJP) mobleraLage.sel = (mobleraLage.sel+1)%owned.length;
+    }
+    if(c.aJP){
+      const [tx,ty] = facingTile(p);
+      const arr = placedMobler[subAktiv.id] || (placedMobler[subAktiv.id]=[]);
+      const idx = arr.findIndex(m=>m.x===tx && m.y===ty-CAVE_Y0);
+      if(idx>=0){ const m = arr.splice(idx,1)[0]; ownedMobler[m.id]=(ownedMobler[m.id]||0)+1; // plocka upp
+        subDecor = subDecor.filter(d=>d.placed!==m); ftext(tx*TS+16, ty*TS, '↑ '+(MOBLER_MAP[m.id]?MOBLER_MAP[m.id].namn:''), '#e8c96a'); save();
+      } else if(owned.length && ty>CAVE_Y0 && ty<=CAVE_Y1 && tx>0 && tx<MW-1){ const md = owned[mobleraLage.sel%owned.length]; // placera vald
+        ownedMobler[md.id]--; const m = { id:md.id, x:tx, y:ty-CAVE_Y0 }; arr.push(m);
+        subDecor.push({ p:md.p, r:md.r, tx, ty, fw:Math.max(1,Math.round(md.r[2]*2/TS)), fh:Math.max(1,Math.round(md.r[3]*2/TS)), placed:m });
+        burst(tx*TS+16, ty*TS+16, '#ffd24f', 6); save();
+      }
+    }
+    if(c.sJP || keys['Escape'] || kbLatch['Escape']){ kbLatch['Escape']=false; mobleraLage=null; }
+    p.anim='idle'; p.animT+=dt; return;
+  }
   // handlar man i butiken styr knapparna butiksmenyn i stället
   if(shopOpen && shopOpen.pid===p.id){
     const n = shopOpen.s.varor.length;
@@ -1910,12 +2129,19 @@ function updPlayer(p, dt){
     p.anim = 'walk';
     // dörren: hela familjen följer med in/ut (kameran klarar inte delade världar)
     const ptx = Math.floor(p.x/TS), pty = Math.floor((p.y+10)/TS);
-    if((ptx===DOOR_OUT.tx||ptx===DOOR_OUT.tx+1) && pty===DOOR_OUT.ty){
+    const _hs = husSub[ptx+','+pty];
+    if(_hs && !subAktiv){ enterSub(_hs, ptx, pty); } // hus med authored interiör — utgången leder tillbaka till SAMMA dörr
+    else if((ptx===DOOR_OUT.tx||ptx===DOOR_OUT.tx+1) && pty===DOOR_OUT.ty && !subAktiv){
       players.forEach((pl,i)=>{ pl.x = ROOM_ENTRY.tx*TS+16+(i%3)*20; pl.y = ROOM_ENTRY.ty*TS+2+Math.floor(i/3)*12; });
       camSnap = true; toast('Hemma! Sov i sängen med T — mattan leder ut');
     } else if((ptx===ROOM_EXIT.tx||ptx===ROOM_EXIT.tx+1) && pty===ROOM_EXIT.ty){
       players.forEach((pl,i)=>{ pl.x = DOOR_SPAWN.tx*TS+16+(i%3)*16; pl.y = DOOR_SPAWN.ty*TS+18+Math.floor(i/3)*12; });
       camSnap = true;
+    } else if(!subAktiv){ // tomt hus (ingen authored interiör + inte hemmet) → hjälpsam hint
+      const th = houses.find(hs=>pty===hs.doorTy && (ptx===hs.doorTx||ptx===hs.doorTx+1));
+      if(th && !(th.doorTx===DOOR_OUT.tx && th.doorTy===DOOR_OUT.ty) && (!p._hintT || time-p._hintT>2.5)){
+        p._hintT = time; toast('Tomt hus — inred det i mapeditorn: 🚪 Rum → klicka huset!');
+      }
     }
   } else p.anim = 'idle';
   p.animT += dt;
@@ -1955,7 +2181,7 @@ function update(dt){
         if(c.sJP){ j.step = 'build'; j.ready = false; }
       }
     }
-    joiners = joiners.filter(j=>!j.remove);
+    joiners = joiners.filter(j=>!j.remove && (j.ctrlId[0]!=='n' || (NET.ctrls[j.ctrlId]&&NET.ctrls[j.ctrlId].alive))); // släpp frånkopplade i lobbyn också
     if(joiners.length>0 && joiners.every(j=>j.ready)) startGame(); // ingen räknare — kör direkt!
     return;
   }
@@ -1994,6 +2220,7 @@ function update(dt){
         const mi = METALS.find(x=>x&&x.id===m);
         toast(mi.namn+'-tackan är klar!');
         burst(FORGE.tx*TS+16, FORGE.ty*TS, mi.farg, 12);
+        save(); // persistera tackan direkt
       }
     }
   }
@@ -2109,7 +2336,7 @@ function update(dt){
       }
       toast('⚔ FARLIG NATT — monster på väg mot grödorna! Försvara gården!');
     } else {
-      slimes = [];
+      if(caveLevel===0) slimes = []; // rensa bara ytans monster — grott-gobliner lever kvar när natten faller nere i grottan
       toast('Natten faller — timers pausade. Tryck T för att sova!');
     }
   }
@@ -2130,7 +2357,7 @@ function update(dt){
         t.soil.wetT -= dt;
         if(t.soil.wetT<=0) t.soil.wet = false;
         const cr = t.soil.crop;
-        if(cr && cr.stage<STAGES){
+        if(cr && CROPS[cr.id] && cr.stage<STAGES){
           cr.prog += dt;
           const per = CROPS[cr.id].tid/STAGES;
           if(cr.prog >= per*(cr.stage+1)) cr.stage++;
@@ -2148,7 +2375,11 @@ function update(dt){
   let cx=0, cy=0;
   players.forEach(p=>{ cx+=p.x; cy+=p.y; });
   cx/=players.length||1; cy/=players.length||1;
-  const txx = clamp(cx-VW/2, 0, MW*TS-VW), tyy = clamp(cy-VH/2, 0, MH*TS-VH);
+  // vertikal klamp: på ytan begränsa till WORLD_H (annars kan grott-/interiörraderna visas vid sydkanten);
+  // horisontell klamp: Math.max(0,...) så smala kartor (MW<30) inte hoppar till negativt x
+  const pRow = players[0] ? Math.floor(players[0].y/TS) : 0;
+  const inUnder = caveLevel>0 || pRow >= WORLD_H; // grotta/husinteriör ligger under ytan
+  const txx = clamp(cx-VW/2, 0, Math.max(0, MW*TS-VW)), tyy = clamp(cy-VH/2, 0, Math.max(0, (inUnder?MH:WORLD_H)*TS-VH));
   if(camSnap){ cam.x=txx; cam.y=tyy; camSnap=false; }
   else { cam.x=lerp(cam.x,txx,dt*5); cam.y=lerp(cam.y,tyy,dt*5); }
 
@@ -2301,7 +2532,7 @@ function draw(){
         // som inspirationsbilden: mörkt parkettgolv, blågrå väggband, brun ram, svart runtom
         const rm = ROOMS.find(r=>tx>=r.x0 && tx<=r.x1);
         const iRoom = rm && ty>=RY0 && ty<=RY1;
-        const iDoor = (tx===13||tx===23) && (ty===44||ty===45);
+        const iDoor = (tx===13||tx===23) && (ty===RY0+2||ty===RY0+3);
         const iWall = rm && (ty===RY0-2 || ty===RY0-1);
         const iFrame = tx>=ROOMS[0].x0-1 && tx<=ROOMS[ROOMS.length-1].x1+1 && ty>=RY0-3 && ty<=RY1+1;
         if(iRoom && IMG.houseTiles){
@@ -2395,12 +2626,13 @@ function draw(){
   // y-sorterade objekt
   const actors = [];
   for(const p of players) actors.push({y:p.y+14, p}); // sortera på FOTLINJEN, inte mitten — annars hamnar man bakom objekt man står tryckt emot
-  actors.push({y:(HOUSE.ty+HOUSE.h)*TS-4, house:true});
+  for(const hs of houses) actors.push({y:(hs.ty+hs.h)*TS-4, house:hs}); // alla hus y-sorterade
   actors.push({y:(CHEST.ty+1)*TS-4, chest:true});
   for(const tr of trees) actors.push({y:(tr.ty+1)*TS-2, tree:tr});
   for(const n of nodes) if(!n.brutet) actors.push({y:(n.ty+1)*TS-1, node:n});
   actors.push({y:(WELL.ty+2)*TS-1, well:true});
   for(const d of decorObjs) actors.push({y:(d.ty+d.fh)*TS-1, decor:d});
+  if(subAktiv) for(const d of subDecor) actors.push({y:(d.ty+d.fh)*TS-1, decor:d}); // möbler i den aktiva sub-arean
   actors.push({y:(FORGE.ty+1)*TS-1, forge:true});
   actors.push({y:(ANVILP.ty+1)*TS-1, anvil:true});
   for(const cr of CRATES){ actors.push({y:(cr.ty+1)*TS-1, crate:cr}); actors.push({y:cr.ty*TS-1, sign:cr}); }
@@ -2408,7 +2640,7 @@ function draw(){
   actors.push({y:RY0*TS-1, hearth:true}); // all väggfast inredning i alla tre rummen
   actors.push({y:(TABLE.ty+1)*TS-1, table:true});
   actors.push({y:(RY0+1)*TS-1, piano:true});
-  actors.push({y:45*TS-1, sofa:true});
+  actors.push({y:(RY0+3)*TS-1, sofa:true});
   for(const s of slimes) actors.push({y:s.y+12, slime:s});
   for(const c of critters) actors.push({y:c.y+8, critter:c});
   for(const d of djur) actors.push({y:d.y+10, djurA:d});
@@ -2420,10 +2652,10 @@ function draw(){
   actors.sort((a,b)=>a.y-b.y);
   for(const a of actors){
     if(a.house){
-      const hi = IMG[HOUSE.img||'house'] || IMG.house;
-      ctx.drawImage(hi, HOUSE.tx*TS-ox, HOUSE.ty*TS-oy, hi.width*2, hi.height*2);
+      const hs = a.house, hi = IMG[hs.img||'house'] || IMG.house;
+      ctx.drawImage(hi, hs.tx*TS-ox, hs.ty*TS-oy, hi.width*2, hi.height*2);
       // varm glöd + studsande pil vid dörren när någon är nära — "här kan man gå in!"
-      const dcx = (DOOR_OUT.tx+1)*TS-ox, dcy = (DOOR_OUT.ty+0.55)*TS-oy;
+      const dcx = (hs.doorTx+1)*TS-ox, dcy = (hs.doorTy+0.55)*TS-oy;
       if(players.some(pl=>dist(pl.x-ox, pl.y-oy, dcx, dcy) < 90)){
         const puls = 0.28+0.12*Math.sin(time*5);
         const gl = ctx.createRadialGradient(dcx, dcy, 4, dcx, dcy, 42);
@@ -2573,7 +2805,7 @@ function draw(){
     } else if(a.piano){
       if(IMG.iothers) ctx.drawImage(IMG.iothers, 2, 102, 30, 24, 30*TS-ox+2, (RY0+1)*TS-oy-48, 60, 48);
     } else if(a.sofa){
-      if(IMG.sofa) ctx.drawImage(IMG.sofa, 13, 17, 28, 22, 26*TS-ox+4, 45*TS-oy-44, 56, 44);
+      if(IMG.sofa) ctx.drawImage(IMG.sofa, 13, 17, 28, 22, 26*TS-ox+4, (RY0+3)*TS-oy-44, 56, 44);
     } else if(a.table){
       if(IMG.tables) ctx.drawImage(IMG.tables, 2, 198, 28, 24, TABLE.tx*TS-ox+4, (TABLE.ty+1)*TS-oy-46, 56, 48);
       if(IMG.chairs){
@@ -2584,7 +2816,7 @@ function draw(){
       const cr = a.sign;
       // skylt bakom lådan: slot-ruta ur paketet + grödans varuikon (egen aktör så z-ordningen stämmer)
       if(IMG.slots) ctx.drawImage(IMG.slots, 151, 6, 18, 18, cr.tx*TS-ox+3, cr.ty*TS-oy-34, 26, 26);
-      if(IMG[cr.crop]) ctx.drawImage(IMG[cr.crop], 7*16, 0, 16, 16, cr.tx*TS-ox+6, cr.ty*TS-oy-31, 20, 20);
+      if(IMG[cr.crop]) ctx.drawImage(IMG[cr.crop], cropIcon(cr.crop), 0, 16, 16, cr.tx*TS-ox+6, cr.ty*TS-oy-31, 20, 20); // varuikon-frame per gröda (vete = 9)
     } else if(a.crate){
       const cr = a.crate;
       const filled = crateCount[cr.crop] > 0;
@@ -2647,7 +2879,7 @@ function draw(){
       }
     } else drawPlayer(a.p, ox, oy);
   }
-  if(caveLevel>0) drawCaveDark(ox, oy); // gruvmörkret med ljusglober
+  if(caveLevel>0 || (subAktiv && subAktiv.mork)) drawCaveDark(ox, oy); // gruvmörkret med ljusglober (även mörka authored underjordar)
   // partiklar & text
   for(const pt of parts){
     ctx.globalAlpha = clamp(pt.ttl/pt.max,0,1);
@@ -2712,8 +2944,24 @@ function toolIconDraw(ti, x, y, s, tiers){
     if(icon) ctx.drawImage(icon, 0, 0, 16, 16, x, y, s, s); // frame 0 = utan vit kontur
   }
 }
+// rita ett UI-element på dess (konfigurerbara) plats/skala. Utan config → standardläget (defX,defY).
+// karta.ui[key] = {show, x, y, scale} där x/y = fraktion (0–1) av skärmen (VW=960, VH=540).
+function uiWrap(key, defX, defY, w, h, drawFn){
+  const c = UI[key] || {};
+  if(c.show===0) return;
+  const s = c.scale || 1;
+  let ox = (c.x!=null) ? c.x*VW : defX;
+  let oy = (c.y!=null) ? c.y*VH : defY;
+  ox = Math.max(0, Math.min(ox, VW - w*s));   // håll elementet inom skärmen
+  oy = Math.max(0, Math.min(oy, VH - h*s));
+  ctx.save();
+  ctx.translate(ox, oy); if(s!==1) ctx.scale(s, s); ctx.translate(-defX, -defY);
+  drawFn();
+  ctx.restore();
+}
 function drawHUD(){
   // klocka + tvåradspanel (UI/Clock/Extras — som inspirationsbilden)
+  uiWrap('klocka', 6, 8, 210, 58, ()=>{
   if(IMG.clockx) ctx.drawImage(IMG.clockx, 144, 6, 56, 26, 46, 12, 168, 52); // sträcks — texten ska rymmas
   else drawPanel(THEME.brown, 8, 8, 252, 60);
   if(IMG.clock) ctx.drawImage(IMG.clock, 6, 8, 56, 56); // runda klockan framför panelens vänsterkant
@@ -2728,7 +2976,9 @@ function drawHUD(){
   const wi = natt ? [1,2] : vader==='regn' ? [3,0] : [0,0]; // måne / regnmoln / sol ur väderarket
   if(IMG.weather) ctx.drawImage(IMG.weather, wi[0]*16, wi[1]*16, 16, 16, 68, 40, 16, 16);
   ctx.fillText(natt?'Natt':vader==='regn'?'Regn':'Sol', 87, 53);
+  });
   // pengar: myntremsan ur Clock/Extras (mynthög + slots att skriva beloppet i)
+  uiWrap('pengar', VW-124, 10, 114, 40, ()=>{
   if(IMG.clockx){
     ctx.drawImage(IMG.clockx, 144, 96, 57, 20, VW-124, 10, 114, 40);
     ctx.fillStyle='#4a2e18'; ctx.font='bold 15px monospace';
@@ -2738,7 +2988,9 @@ function drawHUD(){
     ctx.fillStyle='#3a2a1a'; ctx.font='bold 17px monospace';
     ctx.fillText(coins+' kr', VW-118, 35);
   }
+  });
   // HP + energi som paketets vertikala staplar (hjärta + blixt), nere till vänster
+  uiWrap('matare', 10, VH-138, 44, 122, ()=>{
   const pb = players[0];
   if(IMG.bars && pb){
     const Z = 2, by = VH - 138;
@@ -2756,8 +3008,9 @@ function drawHUD(){
     stapel(10, [147,22,10], [99,22,10], [147,3,10], pb.hp/100);   // hjärta = HP
     stapel(36, [164,3,8],   [116,22,8], [116,3,8],  pb.energy/100); // blixt = energi
   }
+  });
   // spelarkort (ljusa paneler)
-  players.forEach((p,i)=>{
+  uiWrap('kort', 8, 76, 206, 70, ()=>{ players.forEach((p,i)=>{  // fast klamp-höjd (=editorns ruta) → drag-läget round-trippar exakt oavsett spelarantal
     const y = 76+i*70;
     drawPanel(THEME.beige, 8, y, 206, 64);
     drawModChar(ctx, p.def, 'idle', 0, Math.floor(time*5)%4, 6, y+4, 1.3, 0); // bondens egen look som markör
@@ -2798,13 +3051,14 @@ function drawHUD(){
       ctx.fillStyle = nMet.farg;
       ctx.fillText(nMet.namn.toLowerCase()+' '+p.malm[nMet.id]+'/'+p.tackor[nMet.id], mx, y+56);
     } else { ctx.fillStyle='#3b7ea0'; ctx.fillText('slem '+p.mats.goo, mx, y+56); }
-  });
+  }); });
   // verktygsrad = paketets inventory-bricka, 3-slice-sträckt till 12 rutor:
   // ruta 0 = DET MAN BÄR (plockat), ruta 1-11 = verktyg + frön
   const p0 = players[0];
   if(p0 && IMG.slots){
     const Z = 2, nSlots = TOOLDEF.length + 1;
     const tw = (12 + 18*nSlots)*Z, hx = VW/2 - tw/2, hy = VH - 28*Z - 8;
+    uiWrap('hotbar', hx, hy, 492, 28*Z, ()=>{  // fast klamp-bredd (=editorns ruta) → drag-läget round-trippar; default auto-centreras ändå via hx
     ctx.drawImage(IMG.slots, 6, 105, 8, 28, hx, hy, 8*Z, 28*Z);                       // vänsterkant
     ctx.drawImage(IMG.slots, 14, 105, 148, 28, hx+8*Z, hy, tw-16*Z, 28*Z);           // mitten sträcks
     ctx.drawImage(IMG.slots, 162, 105, 8, 28, hx+tw-8*Z, hy, 8*Z, 28*Z);             // högerkant
@@ -2829,7 +3083,7 @@ function drawHUD(){
         ctx.fillText(SLOTLBL[ti]||'', x+3, y+11);
         if(TOOLDEF[ti].seed){
           ctx.font='bold 10px monospace'; ctx.textAlign='right'; ctx.fillStyle='#f2ead6';
-          ctx.fillText(p0.seeds[TOOLDEF[ti].seed], x+33, y+33);
+          ctx.fillText(p0.seeds[TOOLDEF[ti].seed]||0, x+33, y+33);
         }
       }
     }
@@ -2845,6 +3099,7 @@ function drawHUD(){
       ctx.font='bold 10px monospace'; ctx.textAlign='left'; ctx.fillStyle='#7ec8e8';
       ctx.fillText(p0.water, wx + 42*Z + 6, wy + 14);
     }
+  });
   }
   if(NET.open){
     ctx.font='bold 11px monospace'; ctx.textAlign='right'; ctx.fillStyle='#e8c96a';
@@ -2854,6 +3109,8 @@ function drawHUD(){
   if(shopOpen) drawShop();
   if(regOpen) drawRegister();
   if(kokOpen) drawKok();
+  if(mobleraLage && subAktiv) drawMoblera();
+  if(geOpen) drawGe();
   if(dialogOpen) drawDialog();
 }
 // mörkret i gruvan: svart med ljusglober kring spelarna (ritas före HUD)
@@ -2936,23 +3193,23 @@ function drawKok(){
   ctx.fillText('▲▼ välj · ANVÄND = laga & ät · VÄXLA/ESC = stäng', x+w/2, y+h-12);
   ctx.textAlign='left';
 }
-// dialogrutan (paketets dialogue box) + porträtt av bybon
+// dialogrutan: paketets träpanel + porträtt av bybon
+// (dialogue box-arket är en SAMLING småbubblor — oanvändbar som helpanel)
 function drawDialog(){
   const n = dialogOpen.npc, w = 560, h = 130, x = VW/2-w/2, y = VH-h-70;
-  if(IMG.dialogB) ctx.drawImage(IMG.dialogB, 0, 0, 144, 96, x, y, w, h);
-  else drawPanel(THEME.beige, x, y, w, h);
+  drawPanel(THEME.beige, x, y, w, h);
   drawModChar(ctx, n.def, 'idle', 0, Math.floor(time*5)%4, x+16, y+22, 2.6, 0);
   ctx.font='bold 14px monospace'; ctx.textAlign='left'; ctx.fillStyle='#3a2a1a';
   ctx.fillText(n.namn, x+110, y+38);
   ctx.font='13px monospace'; ctx.fillStyle='#4a3a2a';
   const text = n.rep[Math.min(dialogOpen.i, n.rep.length-1)];
-  // enkel radbrytning
-  const ord = text.split(' '); let rad = '', ry = y+62;
-  for(const o of ord){
-    if((rad+o).length > 44){ ctx.fillText(rad, x+110, ry); rad = o+' '; ry += 18; }
-    else rad += o+' ';
-  }
-  ctx.fillText(rad, x+110, ry);
+  // radbrytning med max 3 rader (panelen rymmer inte fler) — längre repliker klipps med …
+  const ord = text.split(' '); const rows = []; let rad = '';
+  for(const o of ord){ if((rad+o).length > 44){ rows.push(rad); rad = o+' '; } else rad += o+' '; }
+  rows.push(rad);
+  const shown = rows.slice(0, 3);
+  if(rows.length > 3) shown[2] = shown[2].trim().slice(0, 42) + '…';
+  shown.forEach((r,i)=>ctx.fillText(r, x+110, y+62+i*18));
   ctx.font='10px monospace'; ctx.textAlign='right'; ctx.fillStyle='#7a6a52';
   ctx.fillText('ANVÄND = nästa ('+(dialogOpen.i+1)+'/'+n.rep.length+')', x+w-18, y+h-14);
   ctx.textAlign='left';
@@ -2982,6 +3239,7 @@ function drawShop(){
     if(CROPS[v.id] && IMG[v.id]) ctx.drawImage(IMG[v.id], cropIcon(v.id), 0, 16, 16, x+30, ry+6, 24, 24);
     else if(v.id==='helm' && IMG.iconHelm) ctx.drawImage(IMG.iconHelm, 0, 0, 16, 16, x+30, ry+6, 24, 24);
     else if(v.id==='plate' && IMG.iconPlate) ctx.drawImage(IMG.iconPlate, 0, 0, 16, 16, x+30, ry+6, 24, 24);
+    else if(MOBLER_MAP[v.id]){ const md=MOBLER_MAP[v.id], im=loadImg(md.p); if(im&&im.naturalWidth){ const sc=Math.min(24/md.r[2],24/md.r[3]); ctx.drawImage(im, md.r[0],md.r[1],md.r[2],md.r[3], x+30+(24-md.r[2]*sc)/2, ry+6+(24-md.r[3]*sc)/2, md.r[2]*sc, md.r[3]*sc); } }
     else {
       const mi = { wood:[IMG.iconsWood,0,0], stone:[IMG.iconsStones,0,0] }[v.id] || (METALS.some(m=>m&&m.id===v.id) ? [IMG.iconsBars,16,0] : null);
       if(mi && mi[0]) ctx.drawImage(mi[0], mi[1], mi[2], 16, 16, x+30, ry+6, 24, 24);
@@ -2989,6 +3247,7 @@ function drawShop(){
     ctx.font = (isSel?'bold ':'')+'14px monospace'; ctx.textAlign='left';
     ctx.fillStyle = isSel ? '#141c10' : '#5a4a36';
     const vnamn = CROPS[v.id] ? CROPS[v.id].fro
+      : MOBLER_MAP[v.id] ? MOBLER_MAP[v.id].namn
       : RUSTNING[v.id] ? RUSTNING[v.id].namn+' (skydd -25%)'
       : METALS.some(m=>m&&m.id===v.id) ? METALS.find(m=>m&&m.id===v.id).namn+'malm'
       : (MATDEF[v.id]||v.id);
@@ -2999,6 +3258,56 @@ function drawShop(){
   });
   ctx.font='11px monospace'; ctx.textAlign='center'; ctx.fillStyle='#7a6a52';
   ctx.fillText('▲▼ välj · ANVÄND = köp · VÄXLA/ESC = stäng', x+w/2, y+h-12);
+  ctx.textAlign='left';
+}
+// möblera-läget: vald möbel + antal + spöklik förhandsvisning vid facing-tilen
+function drawMoblera(){
+  const owned = MOBLER.filter(m=>(ownedMobler[m.id]||0)>0);
+  const pl = players.find(q=>q.id===mobleraLage.pid) || players[0];
+  if(pl && owned.length){
+    const [tx,ty] = facingTile(pl);
+    if(ty>CAVE_Y0 && ty<=CAVE_Y1){
+      const md = owned[mobleraLage.sel%owned.length], im = loadImg(md.p);
+      const dx = tx*TS-Math.round(cam.x), dy = ty*TS-Math.round(cam.y);
+      ctx.globalAlpha = 0.5;
+      if(im && im.naturalWidth) ctx.drawImage(im, md.r[0],md.r[1],md.r[2],md.r[3], dx, dy-(md.r[3]*2-TS), md.r[2]*2, md.r[3]*2);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#ffd678'; ctx.lineWidth = 2; ctx.strokeRect(dx, dy, TS, TS); ctx.lineWidth = 1;
+    }
+  }
+  const w = 360, h = 56, x = VW/2-w/2, y = VH-h-72;
+  drawPanel(THEME.beige, x, y, w, h);
+  ctx.textAlign = 'left';
+  if(!owned.length){ ctx.font='13px monospace'; ctx.fillStyle='#7a6a52'; ctx.fillText('Inga möbler — köp i möbelaffären först!', x+18, y+32); }
+  else {
+    const md = owned[mobleraLage.sel%owned.length], im = loadImg(md.p);
+    if(im && im.naturalWidth){ const sc=Math.min(38/md.r[2], 38/md.r[3]); ctx.drawImage(im, md.r[0],md.r[1],md.r[2],md.r[3], x+16, y+9, md.r[2]*sc, md.r[3]*sc); }
+    ctx.font='bold 15px monospace'; ctx.fillStyle='#3a2a1a'; ctx.fillText('🛋 '+md.namn+'  ×'+ownedMobler[md.id], x+64, y+26);
+    ctx.font='10px monospace'; ctx.fillStyle='#7a6a52'; ctx.fillText('▲▼ välj · ANVÄND placera/plocka · B stäng', x+64, y+44);
+  }
+}
+// ge-menyn: lista givarens saker, ▲▼ välj, ANVÄND = ge 1 st till kompisen
+function drawGe(){
+  const giv = players.find(q=>q.id===geOpen.pid); if(!giv) return;
+  const l = geLista(giv);
+  const radH = 26, w = 340, h = 84 + Math.max(1, Math.min(l.length, 8))*radH;
+  const x = VW/2-w/2, y = Math.max(16, VH/2-h/2-10);
+  ctx.fillStyle = 'rgba(14,20,10,0.45)'; ctx.fillRect(0, 0, VW, VH);
+  drawPanel(THEME.beige, x, y, w, h);
+  ctx.font='bold 15px monospace'; ctx.textAlign='center'; ctx.fillStyle='#3a2a1a';
+  ctx.fillText('🎁 Ge till '+geOpen.target.name, x+w/2, y+28);
+  const start = Math.max(0, Math.min(geOpen.sel-3, l.length-8));
+  l.slice(start, start+8).forEach((post,i)=>{
+    const ri = start+i, ry = y+48+i*radH, isSel = ri===geOpen.sel;
+    ctx.font=(isSel?'bold ':'')+'13px monospace'; ctx.textAlign='left';
+    ctx.fillStyle = isSel ? '#141c10' : '#5a4a36';
+    if(isSel) ctx.fillText('▶', x+14, ry+14);
+    ctx.fillText(post.namn, x+34, ry+14);
+    ctx.textAlign='right'; ctx.fillStyle = isSel ? '#8a4a1a' : '#7a6a52';
+    ctx.fillText('×'+post.n, x+w-24, ry+14);
+  });
+  ctx.font='10px monospace'; ctx.textAlign='center'; ctx.fillStyle='#7a6a52';
+  ctx.fillText('▲▼ välj · ANVÄND = ge 1 st · VÄXLA/ESC = stäng', x+w/2, y+h-12);
   ctx.textAlign='left';
 }
 function drawPauseMenu(){
@@ -3036,6 +3345,21 @@ function drawCloud(x, y, s){
 function drawTitle(){
   drawPanel(THEME.brown, VW/2-260, 34, 520, 152); // träskylt ur paketet bakom titeln
   ctx.textAlign='center';
+  const st = (SPEL && SPEL.start) || null;
+  if(st && st.titel){ // EGET SPEL: titel (delas på mellanslag till 2 rader om lång) + ev. tagline + egna färger
+    const ORD = st.titel.toUpperCase().split(/\s+/).filter(Boolean);
+    let l1 = st.titel.toUpperCase(), l2 = '';
+    if(ORD.length > 1){ const mid = Math.ceil(ORD.length/2); l1 = ORD.slice(0,mid).join(' '); l2 = ORD.slice(mid).join(' '); }
+    const fsz = Math.max(26, Math.min(58, Math.floor(720 / Math.max(l1.length, l2.length, 6))));
+    ctx.font = 'bold '+fsz+'px monospace';
+    const y1 = l2 ? 96 : 120, y2 = 150;
+    ctx.fillStyle = '#3a2a1a';
+    for(const [ox2,oy2] of [[-3,0],[3,0],[0,-3],[0,3],[-2,-2],[2,2],[-2,2],[2,-2]]){ ctx.fillText(l1, VW/2+ox2, y1+oy2); if(l2) ctx.fillText(l2, VW/2+ox2, y2+oy2); }
+    ctx.fillStyle = st.farg1 || '#5cb838'; ctx.fillText(l1, VW/2, y1);
+    if(l2){ ctx.fillStyle = st.farg2 || '#e08a24'; ctx.fillText(l2, VW/2, y2); }
+    if(st.tagline){ ctx.font = 'bold 15px monospace'; ctx.fillStyle = '#f2ead6'; ctx.fillText(st.tagline, VW/2, l2 ? 176 : 150); }
+    return;
+  }
   const t1 = 'PALSSONS', t2 = 'GÅRD';
   ctx.font='bold 58px monospace';
   // tjock mörk kontur
@@ -3113,7 +3437,7 @@ function drawSelect(){
         const bh = j.row===5 ? 46 : 40, by = 454 - (j.row===5?3:0);
         drawWideBtn(cx-colW/2+16, by, colW-32, bh, THEME.greenBtn);
         ctx.font='bold '+(j.row===5?17:15)+'px monospace'; ctx.textAlign='center'; ctx.fillStyle='#14310e';
-        ctx.fillText('SPELA!', cx, by+bh/2+5);
+        ctx.fillText((SPEL&&SPEL.start&&SPEL.start.knapp)||'SPELA!', cx, by+bh/2+5);
       } else if(j.step==='name' && j.ctrlId==='k0'){
         drawPanel(THEME.beige, cx-110, 348, 220, 90);
         ctx.font='bold 13px monospace'; ctx.textAlign='center'; ctx.fillStyle='#3a2a1a';
@@ -3176,6 +3500,14 @@ window.__BITE = ()=>{ const p=players[0]; if(p&&p.fiske){ p.fiske.fas='bite'; p.
 window.__CAVE = l=>{ if(l===0) lamnaCave(); else enterCave(l); return { caveLevel, exit:caveExit, down:caveDown, noder:nodes.filter(n=>n.cave).map(n=>n.type), gobliner:slimes.filter(s=>s.typ==='goblin').length, handlare:shops.filter(s=>s.merch).length }; };
 window.__DJUR = ()=>({ djur:djur.map(d=>({typ:d.typ, x:Math.round(d.x), y:Math.round(d.y), mjolkad:d.mjolkad})), eggs:eggs.length, npcs:npcs.map(n=>n.namn) });
 window.__NATT = ()=>{ klockT = DAG_S; return farligNatt; };
+window.__SUB = ()=>({ aktiv:!!subAktiv, id:subAktiv?subAktiv.id:null, decor:subDecor.length, husPortaler:Object.keys(husSub), stegePortaler:Object.keys(stegeSub) });
+window.__MOBEL = ()=>({ owned:{...ownedMobler}, placed:JSON.parse(JSON.stringify(placedMobler)), moblera:!!mobleraLage, sel:mobleraLage?mobleraLage.sel:null });
+window.__P2 = ()=>{ if(players.length<2){ players.push(makePlayer(players.length, 'p9', {...PRESETS[1]}, 'Kompis')); } return players.length; };
+window.__GE = ()=>({ open:!!geOpen, sel:geOpen?geOpen.sel:null, target:geOpen?geOpen.target.name:null,
+  p0:players[0]?{seeds:{...players[0].seeds}, mats:{...players[0].mats}}:null,
+  p1:players[1]?{seeds:{...players[1].seeds}, mats:{...players[1].mats}}:null });
+window.__BUYMOBEL = (id)=>{ ownedMobler[id]=(ownedMobler[id]||0)+1; return {...ownedMobler}; };
+window.__ENTERSUB = (id)=>enterSub(id, 5, 10); // testhook: hoppa direkt in i en sub-area
 window.__P0X = ()=>players[0] ? { malm:{...players[0].malm}, tackor:{...players[0].tackor}, tier:{...players[0].tier}, rust:{...players[0].rust}, mats:{...players[0].mats}, buff:players[0].buff } : null;
 window.__SPAWNSLIME = (tx,ty)=>{ slimes.push({x:tx*TS+16, y:ty*TS+16, hp:2, dir:0, animT:0, hurtT:0, deadT:0, vx:0, vy:0, mal:null, malT:0}); return slimes.length; };
 window.__TREES = ()=>trees.map(t=>({tx:t.tx, ty:t.ty, hp:t.hp, stump:t.stump}));
