@@ -452,7 +452,7 @@ function buildWaterSheet(){
       tg.clearRect(0,0,16,16);
       tg.drawImage(img, (st[0]+12)*16, (st[1]+f*4)*16, 16, 16, 0, 0, 16, 16);
       const id = tg.getImageData(0,0,16,16); d = id.data;
-      const dekor = i => d[i*4+3]>=200 && d[i*4] > d[i*4+2]-12; // icke-blått
+      const dekor = i => d[i*4+3]>=200 && (Math.abs(d[i*4]-bas[0])+Math.abs(d[i*4+1]-bas[1])+Math.abs(d[i*4+2]-bas[2])) > 110; // allt som avviker klart från basblå (stenar, ljusblå ringar, sand) — vågskuggor nära basen behålls
       const stangd = i => { const x=i%16, y=(i/16)|0;
         return Math.min(!(m&1)?y:99, !(m&2)?15-x:99, !(m&4)?15-y:99, !(m&8)?x:99); };
       const sedd = new Uint8Array(256);
@@ -469,8 +469,21 @@ function buildWaterSheet(){
             if(!sedd[q] && dekor(q)){ sedd[q] = 1; ko.push(q); }
           }
         }
-        for(const p2 of region)
-          if(!strand || stangd(p2)>8){ d[p2*4]=bas[0]; d[p2*4+1]=bas[1]; d[p2*4+2]=bas[2]; d[p2*4+3]=255; }
+        for(const p2 of region){
+          const varm = d[p2*4] > d[p2*4+2]-12; // sand/stenar = varma; ljusblå ringar är ALDRIG strand-skyddade
+          if(!strand || stangd(p2)>8 || !varm){ d[p2*4]=bas[0]; d[p2*4+1]=bas[1]; d[p2*4+2]=bas[2]; d[p2*4+3]=255; }
+        }
+      }
+      // hörnstenarnas MÖRKA ringkonturer = samma färg som vågstrecken → skilj på POSITION: kalla avvikare nära tile-hörn tvättas (vågstreck i mitten berörs ej, sand är varm = skyddad)
+      for(const [cx2,cy2] of [[0,0],[15,0],[0,15],[15,15]]){
+        for(let yy=-7;yy<=7;yy++) for(let xx=-7;xx<=7;xx++){
+          const px2 = cx2+xx, py2 = cy2+yy;
+          if(px2<0||py2<0||px2>15||py2>15 || xx*xx+yy*yy>49) continue;
+          const q = (py2*16+px2)*4;
+          if(d[q+3]<200) continue;
+          if(d[q] > d[q+2]-12) continue; // varm (sand/sten) = skyddad
+          if(Math.abs(d[q]-bas[0])+Math.abs(d[q+1]-bas[1])+Math.abs(d[q+2]-bas[2]) > 30){ d[q]=bas[0]; d[q+1]=bas[1]; d[q+2]=bas[2]; d[q+3]=255; }
+        }
       }
       tg.putImageData(id, 0, 0);
       ag.drawImage(tmp, (m%4)*16, (m>>2)*16);
@@ -2571,6 +2584,14 @@ function draw(){
         const m = (har(tx,ty-1)?1:0)|(har(tx+1,ty)?2:0)|(har(tx,ty+1)?4:0)|(har(tx-1,ty)?8:0);
         if(pathProc) drawTile(pathProc, m%4, m>>2, dx, dy);
         else { const pt = pathAutoTile(tx, ty); drawTile(IMG.grass, pt[0], pt[1], dx, dy); }
+        // innerhörn: gräskil där två vägsidor möts men diagonalen är gräs (8×8-kilarna ur arkets innerhörns-block, SAMMA som editorn)
+        if(IMG.grass){
+          const pN=!!(m&1), pE=!!(m&2), pS=!!(m&4), pW=!!(m&8);
+          if(pN&&pW&&!har(tx-1,ty-1)) ctx.drawImage(IMG.grass, 144, 208, 8, 8, dx, dy, 16, 16);
+          if(pN&&pE&&!har(tx+1,ty-1)) ctx.drawImage(IMG.grass, 168, 224, 8, 8, dx+16, dy, 16, 16);
+          if(pS&&pE&&!har(tx+1,ty+1)) ctx.drawImage(IMG.grass, 152, 216, 8, 8, dx+16, dy+16, 16, 16);
+          if(pS&&pW&&!har(tx-1,ty+1)) ctx.drawImage(IMG.grass, 160, 232, 8, 8, dx, dy+16, 16, 16);
+        }
       }
       if(t.kind>=10 && t.kind<=17 && IMG.pathT){ // stenlagd väg — autotile:as bara mot samma stil
         const har = (x,y)=> x>=0 && y>=0 && x<MW && y<MH && map[y*MW+x].kind===t.kind;
@@ -3480,6 +3501,7 @@ window.__TILE = (tx,ty)=>{ const t=map[ty*MW+tx]; return t ? {kind:t.kind, soil:
 window.__FASTGROW = ()=>{ for(const t of map) if(t.soil&&t.soil.crop){ t.soil.crop.stage=STAGES; } };
 window.__GIVETIME = s=>{ klockT += s; };
 window.__PG = ()=>plainGrass ? plainGrass.toDataURL() : null;
+window.__WATLAS = ()=>waterProc ? waterProc.map(c=>c.toDataURL()) : null;
 window.__DECOR = ()=>{ let n=0; for(let ty=0;ty<MH;ty++) for(let tx=0;tx<MW;tx++){ const h=((tx*2654435761)^(ty*40503))>>>0; if(h%100<7) n++; } return n/(MW*MH); };
 window.__START = ()=>{ if(state==='play') return 'already'; joiners = [{ctrlId:'k0', ci:0, ready:true, fresh:false}]; startGame(); return 'ok'; };
 window.__GIVE = (k,n)=>{ if(players[0]) players[0].mats[k] = (players[0].mats[k]||0)+n; return players[0]?players[0].mats:null; };
