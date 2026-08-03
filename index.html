@@ -3569,6 +3569,11 @@ loadAssets().then(()=>{
   }
   startHost();
   if(IS_TOUCH && Math.min(innerWidth,innerHeight)<900) enableLocalPad();
+  if(URLQ.get('testa')){ // ▶ Testa kartan från editorn: hoppa RAKT in i spelet på vald karta (ingen startskärm)
+    joiners = [{ ctrlId:'k0', ci:0, ready:true, fresh:false }];
+    startGame();
+    toast('▶ Testläge — du är på "'+(valdKarta||'Standardgården')+'". Bygg vidare i editorn & tryck Testa igen!');
+  }
   requestAnimationFrame(frame);
 });
 </script>
