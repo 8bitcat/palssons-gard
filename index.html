@@ -662,7 +662,12 @@ const UI = { klocka:{show:1}, pengar:{show:1}, matare:{show:1}, kort:{show:1}, h
 let startCfg = null;
 try{ const _km0 = customMaps[valdKarta]; if(_km0){ if(_km0.ui) Object.assign(UI, _km0.ui); if(_km0.start) startCfg = _km0.start; } }catch(e){}
 // kartor från servern (delade mellan localhost/LAN/alla enheter) — webben faller tillbaka på localStorage
-fetch('/api/maps').then(r=>r.json()).then(j=>{ customMaps = Object.assign({}, customMaps, j||{}); }).catch(()=>{});
+fetch('/api/maps').then(r=>r.json()).then(j=>{
+  // Testa-läget: editorn skrev precis kartan till localStorage på SAMMA maskin → lokala versionen vinner
+  // (annars kunde en äldre serverkopia med samma namn skriva över det man nyss byggt)
+  if(new URLSearchParams(location.search).get('testa')) customMaps = Object.assign({}, j||{}, customMaps);
+  else customMaps = Object.assign({}, customMaps, j||{});
+}).catch(()=>{});
 // spel-instanser från servern (delas mellan enheter på LAN) — löser upp ?spel-instansen även på en ny enhet
 fetch('/api/spel').then(r=>r.json()).then(j=>{ if(!j) return; spelInstanser = Object.assign({}, spelInstanser, j);
   const _slug = new URLSearchParams(location.search).get('spel');
@@ -850,23 +855,39 @@ function buildCustom(km, set){
       }
     }
   }
-  if(!husSatt){ // utan hus i kartan: standardhusets fot + dörr på gamla platsen
+  // saknade standardbyggnader får ALDRIG stämplas över det man byggt — sök närmaste LEDIGA gräsyta
+  const ledig = (tx0,ty0,w2,h2)=>{ for(let yy=ty0; yy<ty0+h2; yy++) for(let xx=tx0; xx<tx0+w2; xx++){
+    if(xx<1||yy<1||xx>=MW-1||yy>=WORLD_H-1) return false;
+    if(map[yy*MW+xx].kind!==0) return false; } return true; };
+  const hittaLedig = (ptx,pty,w2,h2)=>{
+    if(ledig(ptx,pty,w2,h2)) return {tx:ptx,ty:pty};
+    for(let r=1;r<Math.max(MW,WORLD_H);r++)
+      for(let dy2=-r;dy2<=r;dy2++) for(let dx2=-r;dx2<=r;dx2++){
+        if(Math.max(Math.abs(dx2),Math.abs(dy2))!==r) continue;
+        if(ledig(ptx+dx2,pty+dy2,w2,h2)) return {tx:ptx+dx2,ty:pty+dy2};
+      }
+    return {tx:ptx,ty:pty}; // helt full karta — sista utväg: standardplatsen
+  };
+  if(!husSatt){ // utan hus i kartan: placera standardhuset på ledig yta (hela spriten 8×7 + dörrsteget)
+    const hp = hittaLedig(HOUSE.tx, HOUSE.ty, HOUSE.w, HOUSE.h+1);
+    HOUSE.tx = hp.tx; HOUSE.ty = hp.ty;
+    DOOR_OUT.tx = hp.tx+2; DOOR_OUT.ty = hp.ty+6; DOOR_SPAWN.tx = hp.tx+3; DOOR_SPAWN.ty = hp.ty+7;
     for(let hy=HOUSE.ty+3; hy<HOUSE.ty+HOUSE.h; hy++) for(let hx=HOUSE.tx; hx<HOUSE.tx+HOUSE.w; hx++) set(hx,hy,3);
     set(DOOR_OUT.tx, DOOR_OUT.ty, 0); set(DOOR_OUT.tx+1, DOOR_OUT.ty, 0);
   }
-  // ej utplacerade systemobjekt följer med huset i standardgårdens inbördes layout
+  // ej utplacerade systemobjekt följer huset i standardgårdens inbördes layout — men bara på ledig yta
   const kl = (v,min,max)=>Math.max(min,Math.min(max,v));
   const rel = (dx2,dy2)=>({ tx: kl(HOUSE.tx+dx2, 1, MW-3), ty: kl(HOUSE.ty+dy2, 1, WORLD_H-3) });
-  if(!kista){ const p2 = rel(13,5); CHEST.tx=p2.tx; CHEST.ty=p2.ty; }
+  if(!kista){ const p2 = rel(13,5), f = hittaLedig(p2.tx,p2.ty,1,1); CHEST.tx=f.tx; CHEST.ty=f.ty; }
   set(CHEST.tx, CHEST.ty, 3);
-  if(!ugn){ const p2 = rel(9,2); FORGE.tx=p2.tx; FORGE.ty=p2.ty; }
+  if(!ugn){ const p2 = rel(9,2), f = hittaLedig(p2.tx,p2.ty,1,1); FORGE.tx=f.tx; FORGE.ty=f.ty; }
   set(FORGE.tx, FORGE.ty, 3);
-  if(!stad){ const p2 = rel(12,2); ANVILP.tx=p2.tx; ANVILP.ty=p2.ty; }
+  if(!stad){ const p2 = rel(12,2), f = hittaLedig(p2.tx,p2.ty,1,1); ANVILP.tx=f.tx; ANVILP.ty=f.ty; }
   set(ANVILP.tx, ANVILP.ty, 3);
-  if(!brunn){ const p2 = rel(15,4); WELL.tx=p2.tx; WELL.ty=p2.ty; }
+  if(!brunn){ const p2 = rel(15,4), f = hittaLedig(p2.tx,p2.ty,2,2); WELL.tx=f.tx; WELL.ty=f.ty; }
   set(WELL.tx,WELL.ty,3); set(WELL.tx+1,WELL.ty,3); set(WELL.tx,WELL.ty+1,3); set(WELL.tx+1,WELL.ty+1,3);
   CRATES.forEach((cr,i)=>{
-    if(!cr.flyttad){ const p2 = rel(8+i,5); cr.tx=p2.tx; cr.ty=p2.ty; }
+    if(!cr.flyttad){ const p2 = rel(8+i,5), f = hittaLedig(p2.tx,p2.ty-1,1,2); cr.tx=f.tx; cr.ty=f.ty+1; }
     set(cr.tx, cr.ty, 3); set(cr.tx, cr.ty-1, 3);
   });
   // på egna kartor får man odla överallt
