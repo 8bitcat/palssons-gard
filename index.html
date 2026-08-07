@@ -849,7 +849,7 @@ function buildCustom(km, set){
     }
     else if(o.t && o.t.startsWith('slime')){ monsterSpawns.push({x:x*TS+16, y:y*TS+16}); }
     else if(o.t==='fiende' && o.ark && o.ark.idle){ // editor-byggd fiende: egna ark per tillstånd (idle/walk/damage/dead)
-      monsterSpawns.push({ x:x*TS+16, y:y*TS+16, egen:{ ark:o.ark, c:o.c||32, namn:o.namn||'Fiende' } });
+      monsterSpawns.push({ x:x*TS+16, y:y*TS+16, egen:{ ark:o.ark, c:o.c||32, namn:o.namn||'Fiende', fredlig:o.fredlig?1:0 } });
     }
     else if(o.t==='butik'){ // butikshus: solid som huset, handla vid dörren
       const img = {hus3:'house', hus2:'husB', hus1:'husA', hus4:'husC'}[o.hus]||'husB';
@@ -1006,12 +1006,25 @@ function dayRefresh(){
   }
   spawnSlimes();
 }
+// rutnätscell för fiendeark: föredra 3–4 riktningsrader (arkens standard) före stora block — 128×128 = 32-celler, INTE 64!
+function gissaCell(im){
+  const W = im.naturalWidth, H = im.naturalHeight;
+  let bast = null, bastP = -1;
+  for(const k of [16,24,32,48,64]){
+    if(W%k || H%k) continue;
+    const fr = W/k; if(fr<2 || fr>16) continue;
+    const rader = H/k;
+    const pri = (rader===3||rader===4) ? 3 : rader===7 ? 2 : rader===1 ? 1 : 0;
+    if(pri>bastP || (pri===bastP && k>(bast||0))){ bast = k; bastP = pri; }
+  }
+  return bast || Math.min(H, 32);
+}
 function spawnSlimes(){
   slimes = [];
   const rng = mulberry32(dag*577);
   if(monsterSpawns){ // kartbyggarens utplacerade monster — lever från dag 1!
     for(const m of monsterSpawns)
-      slimes.push({ x:m.x, y:m.y, hp:m.egen?3:2, dir:0, animT:rng()*2, hurtT:0, deadT:0, vx:0, vy:0, mal:null, malT:0, egen:m.egen });
+      slimes.push({ x:m.x, y:m.y, hp:m.egen?3:2, dir:0, animT:rng()*2, hurtT:0, deadT:0, vx:0, vy:0, mal:null, malT:0, egen:m.egen, fredlig:m.egen&&m.egen.fredlig?1:0 });
     return;
   }
   if(dag < 2) return; // dag 1 = lugn start
@@ -2313,9 +2326,9 @@ function update(dt){
     if(s.deadT>0){ s.deadT -= dt; continue; }
     s.animT += dt;
     if(s.hurtT>0){ s.hurtT -= dt; s.x += s.vx*dt; s.y += s.vy*dt; s.vx*=0.85; s.vy*=0.85; continue; }
-    // mål: närmaste spelare inom 150 px, annars strövmål
+    // mål: närmaste spelare inom 150 px, annars strövmål — FREDLIGA varelser jagar aldrig
     let narm = null, nd2 = 150;
-    for(const pl of players){ const d2 = dist(s.x,s.y,pl.x,pl.y); if(d2<nd2){ nd2=d2; narm=pl; } }
+    if(!s.fredlig) for(const pl of players){ const d2 = dist(s.x,s.y,pl.x,pl.y); if(d2<nd2){ nd2=d2; narm=pl; } }
     s.malT -= dt;
     if(narm) s.mal = {x:narm.x, y:narm.y};
     else if(!s.mal || s.malT<=0){ s.mal = {x:s.x+(Math.random()-0.5)*180, y:s.y+(Math.random()-0.5)*180}; s.malT = 2+Math.random()*2; }
@@ -2340,8 +2353,8 @@ function update(dt){
         }
       } else { s.mal = { x:s.matmal.tx*TS+16, y:s.matmal.ty*TS+16 }; }
     }
-    // nudda spelare = HP-skada + knuff — svimmar man vaknar man vid sängen (rustning dämpar)
-    for(const pl of players){
+    // nudda spelare = HP-skada + knuff — svimmar man vaknar man vid sängen (rustning dämpar) · fredliga skadar aldrig
+    if(!s.fredlig) for(const pl of players){
       if(pl.hurtT>0) continue;
       if(dist(s.x,s.y,pl.x,pl.y) < 22){
         const grund = s.dmg||10;
@@ -2953,9 +2966,12 @@ function draw(){
       if(s.egen){ // editor-byggd fiende: rätt ark per tillstånd (dead/damage/walk/idle)
         const ark = s.egen.ark;
         img = loadImg(s.deadT>0 ? (ark.dead||ark.idle) : s.hurtT>0 ? (ark.damage||ark.idle) : (ark.walk||ark.idle));
-        cc = s.egen.c||32;
         if(!(img && img.naturalWidth)) img = null;
-        else nfr = Math.max(1, Math.floor(img.naturalWidth/cc));
+        else {
+          if(!s.egen._c) s.egen._c = gissaCell(img); // räkna om cellen ur arket — själv-läker gamla objekt med fel sparad c
+          cc = s.egen._c;
+          nfr = Math.max(1, Math.floor(img.naturalWidth/cc));
+        }
       } else {
         img = s.typ==='goblin'
           ? (s.deadT>0 ? IMG.gobDead : s.hurtT>0 ? IMG.gobDmg : IMG.gobWalk)
@@ -3610,7 +3626,7 @@ window.__GIVECROP = (id,n)=>{ if(players[0]){ players[0].carry[id] = (players[0]
 window.__CRATES = ()=>({ ...crateCount });
 window.__P0 = ()=>players[0] ? { mats:{...players[0].mats}, tier:{...players[0].tier}, tool:players[0].tool } : null;
 window.__FORGE = forge;
-window.__SLIMES = ()=>slimes.map(s=>({x:Math.round(s.x), y:Math.round(s.y), hp:s.hp, dead:s.deadT>0}));
+window.__SLIMES = ()=>slimes.map(s=>({x:Math.round(s.x), y:Math.round(s.y), hp:s.hp, dead:s.deadT>0, fredlig:s.fredlig?1:0, egen:s.egen?s.egen.namn:null}));
 window.__CRITTERS = ()=>critters.map(c=>({x:Math.round(c.x), y:Math.round(c.y), p:c.p, n:c.n}));
 window.__CNODES = ()=>cnodes.map(c=>({id:c.id, tx:c.tx, ty:c.ty, hp:c.hp, dead:c.dead}));
 window.__SHOPS = ()=>({ n:shops.length, open:!!shopOpen, sel:shopOpen?shopOpen.sel:null, varor:shops[0]?shops[0].varor:[] });
