@@ -2332,6 +2332,28 @@ function update(dt){
     s.malT -= dt;
     if(narm) s.mal = {x:narm.x, y:narm.y};
     else if(!s.mal || s.malT<=0){ s.mal = {x:s.x+(Math.random()-0.5)*180, y:s.y+(Math.random()-0.5)*180}; s.malT = 2+Math.random()*2; }
+    // fiender MED attack-ark: stanna på räckhåll, spela attacken, skada vid träffögonblicket (i st f touch-knuff)
+    if(s.egen && s.egen.ark.attack && !s.fredlig){
+      if(s.attT>=0){
+        s.attT += dt;
+        if(!s.attHit && s.attT > 0.3){ s.attHit = true; // träffögonblicket mitt i svingen
+          for(const pl of players){
+            if(pl.hurtT>0 || dist(s.x,s.y,pl.x,pl.y) >= 48) continue;
+            const skada = Math.max(2, Math.round((s.dmg||10) * (1 - 0.25*((pl.rust.helm?1:0)+(pl.rust.plate?1:0)))));
+            pl.hp = Math.max(0, pl.hp-skada); pl.hurtT = 1;
+            ftext(pl.x, pl.y-44, '-'+skada+' hp!', '#ff8a6a');
+            const kn = Math.atan2(pl.y-s.y, pl.x-s.x);
+            pl.x += Math.cos(kn)*14; pl.y += Math.sin(kn)*14;
+            if(pl.hp<=0){ pl.hp = 50; pl.energy = Math.max(30, pl.energy);
+              pl.x = DOOR_SPAWN.tx*TS+16; pl.y = DOOR_SPAWN.ty*TS+18;
+              toast(pl.name+' svimmade och vaknade vid huset!'); camSnap = true; }
+          }
+        }
+        if(s.attT > 1.0){ s.attT = -1; } // attack klar + liten hämtningspaus
+        continue; // står stilla under attacken
+      }
+      if(narm && nd2 < 38){ s.attT = 0; s.attHit = false; s.dir = Math.abs(narm.x-s.x)>Math.abs(narm.y-s.y) ? (narm.x>s.x?3:2) : (narm.y>s.y?0:1); continue; }
+    }
     const dl = dist(s.x,s.y,s.mal.x,s.mal.y);
     if(dl>6){
       const sp = narm ? 55 : 30;
@@ -2353,8 +2375,9 @@ function update(dt){
         }
       } else { s.mal = { x:s.matmal.tx*TS+16, y:s.matmal.ty*TS+16 }; }
     }
-    // nudda spelare = HP-skada + knuff — svimmar man vaknar man vid sängen (rustning dämpar) · fredliga skadar aldrig
-    if(!s.fredlig) for(const pl of players){
+    // nudda spelare = HP-skada + knuff — svimmar man vaknar man vid sängen (rustning dämpar)
+    // fredliga skadar aldrig · fiender med attack-ark skadar BARA via attacken ovan
+    if(!s.fredlig && !(s.egen && s.egen.ark.attack)) for(const pl of players){
       if(pl.hurtT>0) continue;
       if(dist(s.x,s.y,pl.x,pl.y) < 22){
         const grund = s.dmg||10;
@@ -2963,14 +2986,16 @@ function draw(){
     } else if(a.slime){
       const s = a.slime;
       let img, cc = 32, nfr = 4;
-      if(s.egen){ // editor-byggd fiende: rätt ark per tillstånd (dead/damage/walk/idle)
+      if(s.egen){ // editor-byggd fiende: rätt ark per tillstånd (dead/damage/ATTACK/walk/idle)
         const ark = s.egen.ark;
-        img = loadImg(s.deadT>0 ? (ark.dead||ark.idle) : s.hurtT>0 ? (ark.damage||ark.idle) : (ark.walk||ark.idle));
+        const attNu = s.attT>=0 && s.attT<=1.0 && ark.attack && s.deadT<=0 && s.hurtT<=0;
+        img = loadImg(s.deadT>0 ? (ark.dead||ark.idle) : s.hurtT>0 ? (ark.damage||ark.idle) : attNu ? ark.attack : (ark.walk||ark.idle));
         if(!(img && img.naturalWidth)) img = null;
         else {
           if(!s.egen._c) s.egen._c = gissaCell(img); // räkna om cellen ur arket — själv-läker gamla objekt med fel sparad c
           cc = s.egen._c;
           nfr = Math.max(1, Math.floor(img.naturalWidth/cc));
+          if(attNu) s._attFi = Math.min(nfr-1, Math.floor(s.attT/0.6*nfr)); else s._attFi = null; // attacken spelas EN gång över svingen
         }
       } else {
         img = s.typ==='goblin'
@@ -2981,7 +3006,7 @@ function draw(){
       if(img){
         const rader = s.egen ? Math.max(1, Math.floor(img.naturalHeight/cc)) : 3;
         const row = rader>=3 ? (s.dir===1?1:s.dir===0?0:2) : 0;
-        const fi = Math.floor(s.animT*8)%nfr;
+        const fi = (s._attFi!=null) ? s._attFi : Math.floor(s.animT*8)%nfr;
         const sk = cc*1.5; // samma 1.5x som slimes (32→48)
         ctx.save();
         ctx.translate(Math.round(s.x-ox), Math.round(s.y-oy));
@@ -3611,7 +3636,7 @@ function drawSelect(){
 window.__DBG = ()=>({ state, players:players.length, joiners:joiners.length, dag, coins, natt,
   px:players[0]?Math.round(players[0].x):null, py:players[0]?Math.round(players[0].y):null,
   dir:players[0]?players[0].dir:null, anim:players[0]?players[0].anim:null, facing:players[0]?facingTile(players[0]):null,
-  tool:players[0]?players[0].tool:null, carry:players[0]?players[0].carry:null, energy:players[0]?Math.round(players[0].energy):null });
+  tool:players[0]?players[0].tool:null, carry:players[0]?players[0].carry:null, energy:players[0]?Math.round(players[0].energy):null, hp:players[0]?Math.round(players[0].hp):null });
 window.__NET = NET;
 window.__TP = (tx,ty)=>{ players.forEach((p,i)=>{ p.x=tx*TS+i*24; p.y=ty*TS; }); camSnap=true; };
 window.__TILE = (tx,ty)=>{ const t=map[ty*MW+tx]; return t ? {kind:t.kind, soil:t.soil?{wet:t.soil.wet, crop:t.soil.crop}:null} : null; };
@@ -3626,7 +3651,7 @@ window.__GIVECROP = (id,n)=>{ if(players[0]){ players[0].carry[id] = (players[0]
 window.__CRATES = ()=>({ ...crateCount });
 window.__P0 = ()=>players[0] ? { mats:{...players[0].mats}, tier:{...players[0].tier}, tool:players[0].tool } : null;
 window.__FORGE = forge;
-window.__SLIMES = ()=>slimes.map(s=>({x:Math.round(s.x), y:Math.round(s.y), hp:s.hp, dead:s.deadT>0, fredlig:s.fredlig?1:0, egen:s.egen?s.egen.namn:null}));
+window.__SLIMES = ()=>slimes.map(s=>({x:Math.round(s.x), y:Math.round(s.y), hp:s.hp, dead:s.deadT>0, fredlig:s.fredlig?1:0, egen:s.egen?s.egen.namn:null, att:s.attT>=0?1:0}));
 window.__CRITTERS = ()=>critters.map(c=>({x:Math.round(c.x), y:Math.round(c.y), p:c.p, n:c.n}));
 window.__CNODES = ()=>cnodes.map(c=>({id:c.id, tx:c.tx, ty:c.ty, hp:c.hp, dead:c.dead}));
 window.__SHOPS = ()=>({ n:shops.length, open:!!shopOpen, sel:shopOpen?shopOpen.sel:null, varor:shops[0]?shops[0].varor:[] });
